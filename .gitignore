@@ -1,0 +1,22 @@
+# secrets
+.env
+.dev.vars
+*.pem
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# node / cloudflare
+node_modules/
+.wrangler/
+.tmp/
+.dryrun/
+dist/
+
+# editors & backups
+*.bak
+.DS_Store
+Thumbs.db

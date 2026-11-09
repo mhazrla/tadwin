@@ -1,0 +1,5 @@
+node_modules/
+.tmp/
+.dryrun/
+.wrangler/
+.dev.vars
