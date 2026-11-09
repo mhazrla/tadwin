@@ -52,7 +52,7 @@ export async function getChildren(env: Env, blockId: string): Promise<Json[]> {
   return out;
 }
 
-/** Kumpulkan contoh entri (toggle heading) yang sudah ada sebagai acuan format. */
+/** Collect existing toggle-heading entries as formatting references. */
 export async function findToggleExamples(
   env: Env,
   pageId: string,
@@ -82,7 +82,7 @@ export async function findToggleExamples(
   return examples;
 }
 
-/** Unggah file lewat File Upload API, kembalikan file_upload id. */
+/** Upload a file through the File Upload API; returns the file_upload id. */
 export async function uploadFile(
   env: Env,
   filename: string,
@@ -126,7 +126,7 @@ async function appendChildren(
   }
 }
 
-/** Buat satu toggle heading_1 (audio -> gambar -> teks), kembalikan block id. */
+/** Create one heading_1 toggle (audio -> image -> text); returns the block id. */
 export async function appendEntry(
   env: Env,
   pageId: string,
@@ -178,7 +178,7 @@ export async function appendEntry(
 
   const results = (resp.results as Json[]) ?? [];
   const headingId = results[0]?.id as string | undefined;
-  if (!headingId) throw new Error("Notion tidak mengembalikan id blok baru.");
+  if (!headingId) throw new Error("Notion did not return the new block id.");
 
   if (rest.length) await appendChildren(env, headingId, rest);
   return headingId;

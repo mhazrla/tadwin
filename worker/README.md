@@ -12,8 +12,21 @@ collapsible entry. Runs on **Cloudflare Workers Free** — no VPS, no credit car
 | AI | 9router / OpenAI-compatible | **Gemini** (OpenAI-compatible endpoint) |
 | Audio extraction from video | ffmpeg | none — video is uploaded as `audio/mp4` |
 
-Everything else matches: link → material (text or `.txt`) → audio → image → `/selesai`, one `heading_1`
+Everything else matches: link → material (text or `.txt`) → audio → image → `/done`, one `heading_1`
 toggle per entry, order **audio → image → text**, `>` lines become `quote`, Arabic and harakat preserved.
+
+## Commands
+
+| Command | Aliases | What it does |
+|---|---|---|
+| `/start` | — | Welcome message and instructions |
+| `/title <text>` | `/judul` | Set the entry title (supports `**bold**` / `*italic*`) |
+| `/status` | — | Show the current session |
+| `/done` | `/selesai` | Build the entry in Notion |
+| `/cancel` | `/batal` | Clear the current session |
+| `/help` | — | Show help |
+
+`/setup/<WEBHOOK_SECRET>` registers both the webhook and this command menu in one call.
 
 ## Requirements
 

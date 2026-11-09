@@ -6,7 +6,7 @@ export interface Env {
   AI_API_KEY: string;
   AI_MODEL: string;
   WEBHOOK_SECRET: string;
-  /** Opsional: daftar chat_id yang diizinkan, dipisah koma. */
+  /** Optional: comma-separated list of allowed chat_ids. */
   ALLOWED_CHAT_IDS?: string;
   SESSIONS: DurableObjectNamespace;
 }

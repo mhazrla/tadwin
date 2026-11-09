@@ -24,7 +24,7 @@ export function extOf(name: string): string {
   return dot >= 0 ? name.slice(dot).toLowerCase() : "";
 }
 
-/** Content type audio yang benar-benar diterima Notion File Upload API. */
+/** Audio content types actually accepted by the Notion File Upload API. */
 const AUDIO_EXT: Record<string, string> = {
   "audio/mpeg": ".mp3",
   "audio/mp4": ".m4a",
@@ -34,7 +34,7 @@ const AUDIO_EXT: Record<string, string> = {
   "audio/webm": ".webm",
 };
 
-/** Alias MIME yang lazim dikirim Telegram, tetapi ditolak Notion. */
+/** MIME aliases Telegram commonly sends that Notion rejects. */
 const MIME_ALIAS: Record<string, string> = {
   "audio/m4a": "audio/mp4",
   "audio/x-m4a": "audio/mp4",
@@ -74,7 +74,7 @@ function cleanMime(raw: string | undefined): string {
   return (raw ?? "").toLowerCase().split(";")[0].trim();
 }
 
-/** Content type audio yang didukung Notion, atau null kalau tak bisa dipetakan. */
+/** A Notion-supported audio content type, or null if it cannot be mapped. */
 export function audioMime(raw: string | undefined): string | null {
   const mime = cleanMime(raw);
   if (!mime) return null;
@@ -83,10 +83,10 @@ export function audioMime(raw: string | undefined): string | null {
 }
 
 /**
- * Nama berkas + content_type untuk File Upload API. Notion menolak content_type
- * di luar daftar resmi DAN menolak nama berkas yang ekstensinya tidak cocok.
- * Ekstensi asli diprioritaskan karena MIME dari Telegram sering keliru
- * (mis. .m4a dikirim sebagai audio/m4a).
+ * Filename + content_type for the File Upload API. Notion rejects content_type
+ * values outside its official list AND rejects filenames whose extension does
+ * not match. The original extension wins because Telegram's MIME is often wrong
+ * (e.g. .m4a sent as audio/m4a).
  */
 export function audioUpload(name: string, rawMime: string | undefined): AudioUpload | null {
   const contentType = EXT_MIME[extOf(name)] ?? audioMime(rawMime);
@@ -96,7 +96,7 @@ export function audioUpload(name: string, rawMime: string | undefined): AudioUpl
   return { filename: base + AUDIO_EXT[contentType], contentType };
 }
 
-/** Dekode berkas teks; utamakan UTF-8, lalu Windows-1252. */
+/** Decode a text file: UTF-8 first, then Windows-1252. */
 export function decodeText(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
   try {
@@ -112,7 +112,8 @@ export function extractTitle(material: string): string {
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
   for (const line of lines) {
-    if (line.toLowerCase().startsWith("judul")) {
+    const lower = line.toLowerCase();
+    if (lower.startsWith("judul") || lower.startsWith("title")) {
       const idx = line.indexOf(":");
       if (idx >= 0) {
         const value = line.slice(idx + 1).trim();
@@ -120,10 +121,10 @@ export function extractTitle(material: string): string {
       }
     }
   }
-  return lines[0] ?? "Entri baru";
+  return lines[0] ?? "New entry";
 }
 
-/** Notion membatasi 2000 karakter per rich_text. */
+/** Notion caps rich_text at 2000 characters. */
 export function richText(text: string): Array<Record<string, unknown>> {
   const content = text.length ? text : " ";
   const parts: Array<Record<string, unknown>> = [];
@@ -133,13 +134,13 @@ export function richText(text: string): Array<Record<string, unknown>> {
   return parts;
 }
 
-/** Blok Notion dari item AI; penanda Markdown di teks ikut jadi anotasi. */
+/** Notion block from an AI item; inline Markdown becomes annotations. */
 export function toBlock(item: AiItem): Block | null {
   if (!item || typeof item !== "object") return null;
   return blockOf(item.type ?? "paragraph", item.text ?? "");
 }
 
-/** Ambil array blocks dari jawaban AI yang mungkin dibungkus pagar kode. */
+/** Extract the blocks array from an AI reply that may be wrapped in code fences. */
 export function parseBlocks(content: string | null): AiItem[] | null {
   if (!content) return null;
   let text = content.trim();
@@ -158,12 +159,12 @@ export function parseBlocks(content: string | null): AiItem[] | null {
 const HEX32 = /[0-9a-fA-F]{32}/g;
 const HEX32_EXACT = /^[0-9a-fA-F]{32}$/;
 
-/** Ambil Page ID (UUID) dari link Notion atau ID mentah. */
+/** Extract a Page ID (UUID) from a Notion link or a raw ID. */
 export function parsePageId(input: string): string {
   const raw = input.trim().split("?")[0].split("#")[0].replace(/\/+$/, "");
   const compact = raw.replace(/-/g, "");
 
-  // Jalur utama: 32 karakter hex terakhir (ID selalu di ujung URL Notion).
+  // Main path: the last 32 hex characters (the ID is always at the end of a Notion URL).
   const tail = compact.slice(-32);
   if (HEX32_EXACT.test(tail)) {
     return uuid(tail.toLowerCase());
@@ -171,7 +172,7 @@ export function parsePageId(input: string): string {
 
   const matches = raw.replace(/-/g, "").match(HEX32);
   if (!matches || matches.length === 0) {
-    throw new Error("Tidak menemukan Page ID pada link/ID yang diberikan.");
+    throw new Error("No Page ID found in the given link/ID.");
   }
   return uuid(matches[matches.length - 1].toLowerCase());
 }

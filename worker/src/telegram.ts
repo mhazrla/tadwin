@@ -52,7 +52,7 @@ export interface DownloadedFile {
   size: number;
 }
 
-/** Batas unduh Bot API adalah 20 MB. */
+/** Bot API download limit: 20 MB. */
 export const TELEGRAM_MAX_BYTES = 20 * 1024 * 1024;
 
 export async function downloadFile(
@@ -65,7 +65,7 @@ export async function downloadFile(
   const size = Number(file.file_size ?? 0);
   if (size > TELEGRAM_MAX_BYTES) {
     throw new Error(
-      `File ${(size / 1024 / 1024).toFixed(1)} MB melebihi batas unduh Telegram (20 MB).`,
+      `File ${(size / 1024 / 1024).toFixed(1)} MB exceeds the Telegram download limit (20 MB).`,
     );
   }
 
@@ -73,7 +73,7 @@ export async function downloadFile(
     `https://api.telegram.org/file/bot${env.TELEGRAM_BOT_TOKEN}/${file.file_path}`,
   );
   if (!resp.ok) {
-    throw new Error(`Gagal mengunduh file dari Telegram (${resp.status}).`);
+    throw new Error(`Failed to download the file from Telegram (${resp.status}).`);
   }
   const bytes = await resp.arrayBuffer();
   return { bytes, size: size || bytes.byteLength };
@@ -85,4 +85,12 @@ export async function setWebhook(env: Env, url: string): Promise<unknown> {
     drop_pending_updates: true,
     allowed_updates: ["message"],
   });
+}
+
+/** Registers the slash-command menu shown in Telegram's UI. */
+export async function setMyCommands(
+  env: Env,
+  commands: Array<{ command: string; description: string }>,
+): Promise<unknown> {
+  return tg(env, "setMyCommands", { commands });
 }

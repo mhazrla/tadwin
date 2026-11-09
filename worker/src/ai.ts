@@ -2,20 +2,20 @@ import type { Env } from "./env";
 import { parseBlocks, toBlock, type AiItem, type Block } from "./format";
 import { markdownToBlocks } from "./markdown";
 
-const SYSTEM = `Anda mengubah materi kajian Islam (dari WhatsApp) menjadi blok Notion yang berurutan.
+const SYSTEM = `You turn Islamic study notes (from WhatsApp) into an ordered list of Notion blocks.
 
-Aturan:
-- Keluarkan HANYA JSON valid berbentuk {"blocks":[{"type":"...","text":"..."}]}. Tanpa penjelasan, tanpa pagar kode.
-- Nilai "type" hanya boleh salah satu dari: paragraph, quote, heading_2, heading_3, bulleted_list_item, numbered_list_item, divider.
-- Pertahankan teks Arab dan harakat PERSIS seperti aslinya; jangan menerjemahkan atau mengubahnya.
-- PERTAHANKAN penanda format inline Markdown di dalam "text": **tebal**, *miring*, \`kode\`, ~~coret~~, [teks](url). Jangan membuangnya dan jangan mengubah teksnya.
-- Di sumber, baris kutipan/hadits yang diawali tanda '>' jadikan type "quote".
-- Judul/uraian bab singkat boleh "heading_2" atau "heading_3"; daftar berbutir pakai "bulleted_list_item".
-- Pisahkan uraian panjang menjadi paragraf-paragraf yang wajar. Jangan sertakan baris judul entri.
-- Ikuti gaya blok pada CONTOH yang diberikan bila ada.
+Rules:
+- Output ONLY valid JSON shaped like {"blocks":[{"type":"...","text":"..."}]}. No explanation, no code fences.
+- "type" must be one of: paragraph, quote, heading_2, heading_3, bulleted_list_item, numbered_list_item, divider.
+- Preserve Arabic text and harakat EXACTLY as written; never translate or alter them.
+- PRESERVE inline Markdown markers inside "text": **bold**, *italic*, \`code\`, ~~strike~~, [text](url). Do not strip them and do not rewrite the words.
+- Source lines that are quotes/hadith and start with '>' become type "quote".
+- Short chapter titles/headings may use "heading_2" or "heading_3"; bulleted lists use "bulleted_list_item".
+- Split long passages into reasonable paragraphs. Do not include the entry title line.
+- Follow the block style of the provided EXAMPLES when present.
 `;
 
-/** Batas waktu panggilan AI; sisa waktu dipakai untuk unggah media + tulis Notion. */
+/** AI call timeout; the rest of the budget goes to media uploads and writing to Notion. */
 const AI_TIMEOUT_MS = 20_000;
 
 export async function formatMaterial(
@@ -29,7 +29,7 @@ export async function formatMaterial(
     .map((item) => toBlock(item))
     .filter((block): block is Block => block !== null);
 
-  // Tanpa AI (atau AI mengembalikan sampah): tetap parse Markdown-nya sendiri.
+  // Without AI (or if AI returns junk): still parse the Markdown locally.
   return blocks.length ? blocks : markdownToBlocks(material);
 }
 
@@ -41,10 +41,10 @@ async function callAi(
 ): Promise<AiItem[] | null> {
   const parts: string[] = [];
   if (references.length) {
-    parts.push("CONTOH ENTRI YANG SUDAH ADA (acuan gaya):\n" + references.join("\n\n"));
+    parts.push("EXISTING ENTRY EXAMPLES (style reference):\n" + references.join("\n\n"));
   }
-  parts.push("JUDUL ENTRI:\n" + title);
-  parts.push("MATERI MENTAH:\n" + material);
+  parts.push("ENTRY TITLE:\n" + title);
+  parts.push("RAW MATERIAL:\n" + material);
 
   const base = env.AI_BASE_URL.replace(/\/+$/, "");
   const controller = new AbortController();
@@ -82,14 +82,14 @@ async function callAi(
     const content = textOf(message);
     return parseBlocks(content);
   } catch (error) {
-    console.error("AI request gagal", error);
+    console.error("AI request failed", error);
     return null;
   } finally {
     clearTimeout(timer);
   }
 }
 
-/** Respons reasoning kadang menaruh teks di content:null + reasoning_content. */
+/** Reasoning models sometimes return content:null with the text in reasoning_content. */
 function textOf(message: Record<string, unknown>): string | null {
   for (const key of ["content", "reasoning_content"]) {
     let value = message[key];

@@ -1,7 +1,7 @@
 /**
- * Konversi Markdown (keluaran Gemini) dan entity Telegram menjadi blok Notion
- * dengan anotasi inline: **tebal**, *miring*, `kode`, ~~coret~~, [tautan](url).
- * Tidak bergantung pada format pesan Telegram — teks biasa pun aman.
+ * Convert Markdown (Gemini output) and Telegram entities into Notion blocks
+ * with inline annotations: **bold**, *italic*, `code`, ~~strike~~, [link](url).
+ * Independent of how Telegram renders a message — plain text is safe too.
  */
 
 export type Block = Record<string, unknown>;
@@ -40,7 +40,7 @@ function textItem(token: Token): RichItem {
   return item;
 }
 
-/** Pecah satu baris Markdown menjadi token beranotasi. */
+/** Split one Markdown line into annotated tokens. */
 function parseInline(input: string): Token[] {
   const tokens: Token[] = [];
   let buffer = "";
@@ -111,7 +111,7 @@ function parseInline(input: string): Token[] {
   return tokens;
 }
 
-/** Teks Markdown -> rich_text Notion, termasuk anotasi dan pemecahan 2000 karakter. */
+/** Markdown text -> Notion rich_text, including annotations and 2000-char splitting. */
 export function inlineRichText(markdown: string): RichItem[] {
   const source = markdown.length ? markdown : " ";
   const tokens = parseInline(source);
@@ -149,7 +149,7 @@ const ALLOWED = new Set([
   "divider",
 ]);
 
-/** Satu blok Notion dari tipe + teks Markdown. */
+/** One Notion block from a type plus Markdown text. */
 export function blockOf(type: string, markdown: string): Block | null {
   if (type === "divider") {
     return { object: "block", type: "divider", divider: {} };
@@ -171,7 +171,7 @@ const BULLET = /^[-*+]\s+(.*)$/;
 const NUMBERED = /^\d+[.)]\s+(.*)$/;
 const TABLE_ROW = /^\|.*\|$/;
 
-/** Markdown lengkap -> blok Notion (heading, kutipan, daftar, kode, tabel). */
+/** Full Markdown -> Notion blocks (headings, quotes, lists, code, tables). */
 export function markdownToBlocks(markdown: string): Block[] {
   const lines = markdown.replace(/\r\n?/g, "\n").split("\n");
   const blocks: Block[] = [];
@@ -274,9 +274,9 @@ export function markdownToBlocks(markdown: string): Block[] {
 }
 
 /**
- * Entity Telegram -> penanda Markdown. Offset entity memakai satuan UTF-16,
- * sama dengan indeks string JavaScript, jadi bisa dipakai langsung.
- * Diproses dari belakang supaya offset sebelumnya tidak bergeser.
+ * Telegram entities -> Markdown markers. Entity offsets are UTF-16 units,
+ * the same as JavaScript string indices, so they can be used directly.
+ * Applied back-to-front so earlier offsets do not shift.
  */
 export function entitiesToMarkdown(text: string, entities?: TgEntity[]): string {
   if (!entities?.length) return text;

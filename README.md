@@ -59,14 +59,26 @@ contain **at least one toggle entry** — Tadwin copies that entry's style. With
 | Step | What to send |
 |---|---|
 | 1 | The Notion page link |
-| 2 | *(optional)* `/judul <text>` to set the entry title |
+| 2 | *(optional)* `/title <text>` to set the entry title |
 | 3 | The material — plain text, or a `.txt` file for long notes (Telegram messages cap at ~4096 chars) |
 | 4 | Audio, then an image (image caption becomes the description) |
-| 5 | `/selesai` to build the entry |
+| 5 | `/done` to build the entry |
 
-Without `/judul`, the title comes from a `judul : ...` line, otherwise the first non-empty line.
+Without `/title`, the title comes from a `title : ...` (or `judul : ...`) line, otherwise the first
+non-empty line.
 
-Other commands: `/status` (current session), `/batal` (reset), `/help`.
+### Commands
+
+The bot registers these in Telegram's command menu, so typing `/` shows the list.
+
+| Command | Aliases | What it does |
+|---|---|---|
+| `/start` | — | Welcome message and instructions |
+| `/title <text>` | `/judul` | Set the entry title (supports `**bold**` / `*italic*`) |
+| `/status` | — | Show the current session: page, title, material size, audio, image |
+| `/done` | `/selesai` | Build the entry in Notion |
+| `/cancel` | `/batal` | Clear the current session |
+| `/help` | — | Show help |
 
 ---
 
