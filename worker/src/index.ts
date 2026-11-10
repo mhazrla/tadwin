@@ -46,10 +46,12 @@ const HELP =
   "2. (Optional) /title <text> to set the entry title.\n" +
   "3. Send the material: plain text, or a .txt file for long notes.\n" +
   "4. Send audio, then an image (the caption becomes the description).\n" +
-  "5. /done to build the entry.\n\n" +
-  "To read what is already on a page, send /browse (or /browse <link>), then tap an entry.\n\n" +
+  "5. /done to preview, then confirm to build the entry.\n\n" +
+  "To read what is already on a page, send /browse (or /browse <link>), then tap an entry.\n" +
+  "To search, send /search <keyword> (title + content).\n\n" +
   "Commands:\n" +
   "/browse  browse pages and entries, then read one\n" +
+  "/search  search sections and pages by keyword\n" +
   "/title  set the entry title\n" +
   "/status  show the current session\n" +
   "/cancel  clear the session\n" +

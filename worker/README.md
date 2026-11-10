@@ -21,6 +21,7 @@ toggle per entry, order **audio → image → text**, `>` lines become `quote`, 
 |---|---|---|
 | `/start` | — | Welcome message and instructions |
 | `/browse [link]` | `/jelajah`, `/sections`, `/daftar`, `/pages`, `/halaman` | Browse a page: entries, child pages, or its own content |
+| `/search <keyword>` | `/cari` | Search sections and pages (title + content) |
 | `/title <text>` | `/judul` | Set the entry title (supports `**bold**` / `*italic*`) |
 | `/status` | — | Show the current session |
 | `/done` | `/selesai` | Build the entry in Notion |
