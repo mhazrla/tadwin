@@ -92,44 +92,58 @@ export interface PageRef {
   title: string;
 }
 
-/** Child pages of a page, in document order. */
-export async function listPages(
-  env: Env,
-  pageId: string,
-  max = 200,
-): Promise<PageRef[]> {
-  const out: PageRef[] = [];
-  for (const block of await getChildren(env, pageId)) {
-    if (out.length >= max) break;
-    if (block.type !== "child_page") continue;
-    const obj = block.child_page as Json | undefined;
-    out.push({
-      id: block.id as string,
-      title: ((obj?.title as string) ?? "").trim() || "Untitled",
-    });
-  }
-  return out;
-}
-
 /** Toggle headings on a page, in document order — the readable "sections". */
 export async function listSections(
   env: Env,
   pageId: string,
   max = 200,
 ): Promise<SectionRef[]> {
-  const out: SectionRef[] = [];
+  return (await listPageContent(env, pageId, max)).sections;
+}
+
+/** Child pages of a page, in document order. */
+export async function listPages(
+  env: Env,
+  pageId: string,
+  max = 200,
+): Promise<PageRef[]> {
+  return (await listPageContent(env, pageId, max)).pages;
+}
+
+/** One pass over a page's children: toggle headings and child pages together. */
+export async function listPageContent(
+  env: Env,
+  pageId: string,
+  max = 200,
+): Promise<{ sections: SectionRef[]; pages: PageRef[] }> {
+  const sections: SectionRef[] = [];
+  const pages: PageRef[] = [];
+
   for (const block of await getChildren(env, pageId)) {
-    if (out.length >= max) break;
+    if (sections.length >= max && pages.length >= max) break;
+
+    if (block.type === "child_page") {
+      if (pages.length >= max) continue;
+      const obj = block.child_page as Json | undefined;
+      pages.push({
+        id: block.id as string,
+        title: ((obj?.title as string) ?? "").trim() || "Untitled",
+      });
+      continue;
+    }
+
     const type = block.type as string | undefined;
     if (!type || !["heading_1", "heading_2", "heading_3"].includes(type)) continue;
     const obj = block[type] as Json | undefined;
     if (!obj?.is_toggleable) continue;
-    out.push({
+    if (sections.length >= max) continue;
+    sections.push({
       id: block.id as string,
       title: plain(block).trim() || "Untitled",
     });
   }
-  return out;
+
+  return { sections, pages };
 }
 
 export interface SectionContent {

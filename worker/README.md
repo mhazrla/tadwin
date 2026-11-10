@@ -20,8 +20,7 @@ toggle per entry, order **audio → image → text**, `>` lines become `quote`, 
 | Command | Aliases | What it does |
 |---|---|---|
 | `/start` | — | Welcome message and instructions |
-| `/pages [link]` | `/halaman` | List child pages; tap one to open it |
-| `/sections [link]` | `/daftar` | List existing entries as buttons; tap one to read it |
+| `/browse [link]` | `/jelajah`, `/sections`, `/daftar`, `/pages`, `/halaman` | Browse a page: entries, child pages, or its own content |
 | `/title <text>` | `/judul` | Set the entry title (supports `**bold**` / `*italic*`) |
 | `/status` | — | Show the current session |
 | `/done` | `/selesai` | Build the entry in Notion |
@@ -30,26 +29,24 @@ toggle per entry, order **audio → image → text**, `>` lines become `quote`, 
 
 `/setup/<WEBHOOK_SECRET>` registers both the webhook and this command menu in one call.
 
-## Browsing child pages
+## Browsing a page
 
-`/pages` lists the `child_page` blocks of the session page (or `/pages <link>` for any page) as an
-inline keyboard, 8 per page; `◀ Prev` / `Next ▶` edit that same message. Tapping one deletes the
-list, sets that child page as the session page, and then drills down in this order:
+`/browse` reads the session page, or `/browse <link>` any page, and shows whatever it contains:
 
-1. its toggle-heading entries (`/sections` behaviour), if it has any;
-2. otherwise its own child pages, so deeper levels stay reachable;
+1. its toggle-heading entries, if it has any;
+2. otherwise its child pages, so deeper levels stay reachable;
 3. otherwise the page's own content (audio, image, then HTML text).
 
-A page with neither entries nor child pages is therefore still readable, and `/done` afterwards
-appends to the page that was opened last.
+Entries and child pages are rendered as an inline keyboard, 8 per page; `◀ Prev` / `Next ▶` edit that
+same message. A page with both kinds shows its entries first plus a `Pages (n)` button that switches
+the same message to the child pages (`Sections (n)` switches back); the switch row is omitted when a
+page has only one kind.
 
-## Reading entries back
-
-`/sections` lists the toggle headings of the session page (or `/sections <link>` for any page) as an
-inline keyboard, 8 per page. `◀ Prev` / `Next ▶` edit that same message, so the chat does not fill up
-with list bubbles. Tapping an entry deletes the list message, then fetches that toggle's children and
-sends them to Telegram: audio as a playable file, image as a photo with its caption, then the text as
-Telegram HTML (bold, italic, code, strike, links, quotes, lists, headings preserved).
+Tapping an entry deletes the list message, then fetches that toggle's children and sends them to
+Telegram: audio as a playable file, image as a photo with its caption, then the text as Telegram HTML
+(bold, italic, code, strike, links, quotes, lists, headings preserved). Tapping a child page deletes
+the list, makes it the session page, and browses it with the same order, so a page with neither
+entries nor child pages is still readable. `/done` afterwards appends to the page opened last.
 
 Quote blocks are rendered as a single `<blockquote>` including their nested children — Notion stores
 the translation inside the quote block, not next to it.

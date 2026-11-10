@@ -74,38 +74,41 @@ The bot registers these in Telegram's command menu, so typing `/` shows the list
 | Command | Aliases | What it does |
 |---|---|---|
 | `/start` | — | Welcome message and instructions |
-| `/pages [link]` | `/halaman` | List child pages; tap one to open it |
-| `/sections [link]` | `/daftar` | List existing entries as buttons; tap one to read it |
+| `/browse [link]` | `/jelajah`, `/sections`, `/daftar`, `/pages`, `/halaman` | Browse a page: entries, child pages, or its own content |
 | `/title <text>` | `/judul` | Set the entry title (supports `**bold**` / `*italic*`) |
 | `/status` | — | Show the current session: page, title, material size, audio, image |
 | `/done` | `/selesai` | Build the entry in Notion |
 | `/cancel` | `/batal` | Clear the current session |
 | `/help` | — | Show help |
 
-## Browsing child pages
+## Browsing a page
 
-Send `/pages` (uses the session page) or `/pages <link>` for any page. Tadwin lists that page's child
-pages as inline buttons — 8 per page, with the same `◀ Prev` / `Next ▶` navigation. Tap one and the
-list disappears while Tadwin opens the page, makes it the session page, and shows what is inside it:
+Send `/browse` to use the page already in the session, or `/browse <link>` for any page. The bot reads
+the page and shows whatever is inside it, so you do not have to know in advance whether it holds
+entries or sub-pages:
 
 1. its toggle-heading entries, if it has any;
-2. otherwise its own child pages, so you can keep drilling down;
-3. otherwise the page's content itself (audio, image, and text).
+2. otherwise its child pages, so you can drill down;
+3. otherwise the page's own content (audio, image, and text).
 
-So a hierarchy like `Notes → MATERI HSI → 0. Pengagungan Terhadap Ilmu → Halaqah 01` can be walked one
-tap at a time, and `/done` afterwards appends to whichever page you opened last.
+Entries and child pages are both shown as inline buttons, 8 per page, with `◀ Prev` / `Next ▶` editing
+the same message so the chat does not fill up. Labels keep the start and end of the title, so long
+`Halaqah …` titles stay distinguishable.
 
-## Reading existing entries
+If a page has **both** entries and child pages, the entries are shown first and one extra button
+(`Pages (n)`) switches the same message to the child pages; `Sections (n)` switches back. When a page
+has only one kind, that button is omitted.
 
-Send `/sections` (uses the page already in the session) or `/sections <link>` to point at any page.
-Tadwin shows the page's toggle headings as an inline keyboard, 8 per page, with `◀ Prev` / `Next ▶`
-to move between pages — the list message is edited in place, so the chat does not fill up. Labels keep
-the start and end of the title, so long `Halaqah …` titles stay distinguishable. Tap one and the bot
-deletes the list, then sends that entry back:
+Tapping an entry deletes the list and sends it back:
 
 - **Audio** — sent as a playable file (Telegram fetches the Notion URL directly).
 - **Image** — sent as a photo, with its Notion caption.
 - **Text** — sent with formatting preserved (bold, italic, code, strike, links, quotes, lists, headings).
+
+Tapping a child page deletes the list, makes that page the session page, and immediately browses it
+with the same three-step order, so a hierarchy like
+`Notes → MATERI HSI → 0. Pengagungan Terhadap Ilmu → Halaqah 01` can be walked one tap at a time.
+`/done` afterwards appends to whichever page you opened last.
 
 Nothing is modified on the Notion side. Notion media URLs are signed and expire after roughly an
 hour, so they are fetched immediately and never stored; if a URL has already expired the bot falls
