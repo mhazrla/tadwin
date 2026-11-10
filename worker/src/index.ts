@@ -48,7 +48,8 @@ const HELP =
   "4. Send audio, then an image (the caption becomes the description).\n" +
   "5. /done to preview, then confirm to build the entry.\n\n" +
   "To read what is already on a page, send /browse (or /browse <link>), then tap an entry.\n" +
-  "To search, send /search <keyword> (title + content).\n\n" +
+  "To search, send /search <keyword> (title + content). Spaces are fine; no quotes needed.\n" +
+  "  Optional link: /search <link> <keyword>.\n\n" +
   "Commands:\n" +
   "/browse  browse pages and entries, then read one\n" +
   "/search  search sections and pages by keyword\n" +
@@ -56,7 +57,7 @@ const HELP =
   "/status  show the current session\n" +
   "/cancel  clear the session\n" +
   "/clearchat  delete the bot's messages in this chat\n" +
-  "/done  build the entry in Notion\n" +
+  "/done  preview and build the entry\n" +
   "/help  show this message";
 
 /** Shown in Telegram's command menu (also registered via setMyCommands). */
@@ -756,6 +757,9 @@ async function handleSearch(env: Env, chatId: number, arg: string): Promise<void
     }
   }
 
+  // Strip surrounding quotes so "/search \"foo bar\"" works.
+  keyword = keyword.replace(/^["'](.*)["']$/, "$1").trim();
+
   if (!keyword) {
     await sendMessage(env, chatId, "Usage: /search <keyword>  (or /search <link> <keyword>)");
     return;
@@ -772,7 +776,6 @@ async function handleSearch(env: Env, chatId: number, arg: string): Promise<void
 
   const lower = keyword.toLowerCase();
 
-  // Make sure lists are cached.
   let sections: SectionRef[];
   let pages: PageRef[];
   try {
@@ -785,75 +788,76 @@ async function handleSearch(env: Env, chatId: number, arg: string): Promise<void
   await sessionCall(env, chatId, { op: sections.length ? "setSections" : "clearSections", pageId, items: sections });
   await sessionCall(env, chatId, { op: pages.length ? "setPages" : "clearPages", pageId, items: pages });
 
-  // Search titles first (cheap), then content in parallel (capped).
-  const titleSections = sections.filter((s) => s.title.toLowerCase().includes(lower));
-  const titlePages = pages.filter((p) => p.title.toLowerCase().includes(lower));
+  // Title matches are instant (no extra fetches).
+  const titleSecIdx = sections
+    .map((s, i) => (s.title.toLowerCase().includes(lower) ? i : -1))
+    .filter((i) => i >= 0);
+  const titlePagIdx = pages
+    .map((p, i) => (p.title.toLowerCase().includes(lower) ? i : -1))
+    .filter((i) => i >= 0);
 
-  const contentSectionIdx: number[] = [];
-  const contentPageIdx: number[] = [];
+  if (titleSecIdx.length || titlePagIdx.length) {
+    const keyboard: InlineButton[][] = [];
+    for (const i of titleSecIdx) keyboard.push([{ text: buttonLabel(sections[i].title), callback_data: `ret:${i}` }]);
+    for (const i of titlePagIdx) keyboard.push([{ text: buttonLabel(pages[i].title), callback_data: `open:${i}` }]);
+    await sendKeyboardMessage(
+      env,
+      chatId,
+      `Search "${keyword}" - title matches: ${titleSecIdx.length} section(s), ${titlePagIdx.length} page(s)`,
+      keyboard,
+    );
+  }
 
-  const cap = 20;
+  // Content search: fetch in small batches to avoid Notion rate limits.
+  const cap = 15;
   const secToCheck = sections.slice(0, cap);
   const pagToCheck = pages.slice(0, cap);
 
   async function batched(items: any[], fn: (x: any) => Promise<any>) {
-    const out = [];
+    const out: any[] = [];
     const size = 5;
     for (let i = 0; i < items.length; i += size) {
       const chunk = items.slice(i, i + size);
       const res = await Promise.allSettled(chunk.map(fn));
       out.push(...res);
-      if (i + size < items.length) await new Promise((r) => setTimeout(r, 250));
+      if (i + size < items.length) await new Promise((r) => setTimeout(r, 300));
     }
     return out;
   }
 
+  const contentSecIdx: number[] = [];
   const secResults = await batched(secToCheck, (s) => getSectionContent(env, s.id));
   secResults.forEach((r, i) => {
     if (r.status !== "fulfilled") return;
     const c = r.value;
     const haystack = (c.html ?? []).join("\n").toLowerCase();
-    if (haystack.includes(lower) && !titleSections.includes(sections[i])) {
-      contentSectionIdx.push(i);
-    }
+    if (haystack.includes(lower) && !titleSecIdx.includes(i)) contentSecIdx.push(i);
   });
 
+  const contentPagIdx: number[] = [];
   const pagResults = await batched(pagToCheck, (p) => getSectionContent(env, p.id));
   pagResults.forEach((r, i) => {
     if (r.status !== "fulfilled") return;
     const c = r.value;
     const haystack = (c.html ?? []).join("\n").toLowerCase();
-    if (haystack.includes(lower) && !titlePages.includes(pages[i])) {
-      contentPageIdx.push(i);
-    }
+    if (haystack.includes(lower) && !titlePagIdx.includes(i)) contentPagIdx.push(i);
   });
 
-  const matchedSections = [
-    ...titleSections.map((s) => sections.indexOf(s)),
-    ...contentSectionIdx,
-  ];
-  // dedupe
-  const uniqSec = [...new Set(matchedSections)];
-  const uniqPag = [...new Set([...titlePages.map((p) => pages.indexOf(p)), ...contentPageIdx])];
+  if (contentSecIdx.length || contentPagIdx.length) {
+    const keyboard: InlineButton[][] = [];
+    for (const i of contentSecIdx) keyboard.push([{ text: buttonLabel(sections[i].title), callback_data: `ret:${i}` }]);
+    for (const i of contentPagIdx) keyboard.push([{ text: buttonLabel(pages[i].title), callback_data: `open:${i}` }]);
+    await sendKeyboardMessage(
+      env,
+      chatId,
+      `Search "${keyword}" - also in content: ${contentSecIdx.length} section(s), ${contentPagIdx.length} page(s)`,
+      keyboard,
+    );
+  }
 
-  if (uniqSec.length === 0 && uniqPag.length === 0) {
+  if (!titleSecIdx.length && !titlePagIdx.length && !contentSecIdx.length && !contentPagIdx.length) {
     await sendMessage(env, chatId, `No matches for "${keyword}".`);
-    return;
   }
-
-  const lines: string[] = [`Search "${keyword}" - ${uniqSec.length} section(s), ${uniqPag.length} page(s)`];
-  const keyboard: InlineButton[][] = [];
-
-  for (const i of uniqSec) {
-    const s = sections[i];
-    keyboard.push([{ text: buttonLabel(s.title), callback_data: `ret:${i}` }]);
-  }
-  for (const i of uniqPag) {
-    const p = pages[i];
-    keyboard.push([{ text: buttonLabel(p.title), callback_data: `open:${i}` }]);
-  }
-
-  await sendKeyboardMessage(env, chatId, lines[0], keyboard);
 }
 
 async function handleCallback(env: Env, query: TgCallbackQuery): Promise<void> {
