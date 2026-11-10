@@ -49,6 +49,10 @@ Telegram: audio as a playable file, image as a photo with its caption, then the 
 the list, makes it the session page, and browses it with the same order, so a page with neither
 entries nor child pages is still readable. `/done` afterwards appends to the page opened last.
 
+After a pick the bot sends **Back** and **Home** buttons: **Back** re-opens the list you came from
+(or the previous level), **Home** jumps to the page you first browsed. At the home page only **Back**
+is shown, to re-open the current list.
+
 Quote blocks are rendered as a single `<blockquote>` including their nested children — Notion stores
 the translation inside the quote block, not next to it.
 

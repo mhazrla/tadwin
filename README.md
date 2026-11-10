@@ -115,10 +115,14 @@ Nothing is modified on the Notion side. Notion media URLs are signed and expire 
 hour, so they are fetched immediately and never stored; if a URL has already expired the bot falls
 back to sending the link as text.
 
-## Clearing the chat
+## Navigation after a pick
 
+After tapping an entry or a child page, the bot sends **Back** and **Home** buttons (when they make
+sense): **Back** re-opens the list you came from (or the previous level), **Home** jumps to the page
+you first browsed. At the home page itself only **Back** is shown, to re-open the current list.
+
+## Clearing the chat
 `/clearchat` (alias `/bersihkan`) deletes the messages the bot sent in this chat. Telegram only
-allows a bot to delete its own messages, and only within 48 hours, so older messages are counted as
 skipped. Your own messages stay. IDs are remembered from now on; messages sent before this feature
 was deployed cannot be removed by the bot.
 
