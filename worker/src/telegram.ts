@@ -37,14 +37,17 @@ export async function sendMessage(
   env: Env,
   chatId: number,
   text: string,
-): Promise<void> {
+): Promise<number[]> {
+  const ids: number[] = [];
   for (const chunk of splitText(text)) {
-    await tg(env, "sendMessage", {
+    const message = await tg<{ message_id: number }>(env, "sendMessage", {
       chat_id: chatId,
       text: chunk,
       disable_web_page_preview: true,
     });
+    if (message && typeof message.message_id === "number") ids.push(message.message_id);
   }
+  return ids;
 }
 
 export interface DownloadedFile {
@@ -107,13 +110,14 @@ export async function sendKeyboardMessage(
   chatId: number,
   text: string,
   buttons: InlineButton[][],
-): Promise<void> {
-  await tg(env, "sendMessage", {
+): Promise<number | undefined> {
+  const message = await tg<{ message_id: number }>(env, "sendMessage", {
     chat_id: chatId,
     text,
     disable_web_page_preview: true,
     reply_markup: { inline_keyboard: buttons },
   });
+  return message?.message_id;
 }
 
 /** Replace a message's text and keyboard in place (used for pagination). */
@@ -159,13 +163,14 @@ export async function sendPhoto(
   chatId: number,
   url: string,
   caption?: string,
-): Promise<void> {
+): Promise<number | undefined> {
   const payload: Record<string, unknown> = { chat_id: chatId, photo: url };
   if (caption) {
     payload.caption = caption.slice(0, 1024);
     payload.parse_mode = "HTML";
   }
-  await tg(env, "sendPhoto", payload);
+  const message = await tg<{ message_id: number }>(env, "sendPhoto", payload);
+  return message?.message_id;
 }
 
 /** Send an audio file straight from a URL; Telegram fetches it itself. */
@@ -174,13 +179,14 @@ export async function sendAudio(
   chatId: number,
   url: string,
   caption?: string,
-): Promise<void> {
+): Promise<number | undefined> {
   const payload: Record<string, unknown> = { chat_id: chatId, audio: url };
   if (caption) {
     payload.caption = caption.slice(0, 1024);
     payload.parse_mode = "HTML";
   }
-  await tg(env, "sendAudio", payload);
+  const message = await tg<{ message_id: number }>(env, "sendAudio", payload);
+  return message?.message_id;
 }
 
 /** Send any file straight from a URL; used when audio/photo handling rejects it. */
@@ -189,13 +195,14 @@ export async function sendDocument(
   chatId: number,
   url: string,
   caption?: string,
-): Promise<void> {
+): Promise<number | undefined> {
   const payload: Record<string, unknown> = { chat_id: chatId, document: url };
   if (caption) {
     payload.caption = caption.slice(0, 1024);
     payload.parse_mode = "HTML";
   }
-  await tg(env, "sendDocument", payload);
+  const message = await tg<{ message_id: number }>(env, "sendDocument", payload);
+  return message?.message_id;
 }
 
 const HTML_LIMIT = 3800;
@@ -218,8 +225,9 @@ export async function sendHtml(
   env: Env,
   chatId: number,
   blocks: string[],
-): Promise<void> {
+): Promise<number[]> {
   const messages: string[] = [];
+  const ids: number[] = [];
   let buffer = "";
 
   for (const block of blocks) {
@@ -242,20 +250,23 @@ export async function sendHtml(
 
   for (const message of messages) {
     if (message.length <= 4000) {
-      await tg(env, "sendMessage", {
+      const sent = await tg<{ message_id: number }>(env, "sendMessage", {
         chat_id: chatId,
         text: message,
         parse_mode: "HTML",
         disable_web_page_preview: true,
       });
+      if (sent && typeof sent.message_id === "number") ids.push(sent.message_id);
       continue;
     }
     for (const part of splitText(stripTags(message), 4000)) {
-      await tg(env, "sendMessage", {
+      const sent = await tg<{ message_id: number }>(env, "sendMessage", {
         chat_id: chatId,
         text: part,
         disable_web_page_preview: true,
       });
+      if (sent && typeof sent.message_id === "number") ids.push(sent.message_id);
     }
   }
+  return ids;
 }

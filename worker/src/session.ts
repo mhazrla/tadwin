@@ -54,6 +54,13 @@ export function emptyState(): SessionState {
 
 type PushField = "materials" | "audios" | "images";
 
+/**
+ * Bot message IDs live under their own key, not inside the session, so /cancel
+ * (which deletes the session) cannot erase the record /clearchat depends on.
+ */
+const MESSAGES_KEY = "botMessages";
+const MAX_TRACKED_MESSAGES = 200;
+
 export class SessionDO {
   private state: DurableObjectState;
 
@@ -148,6 +155,30 @@ export class SessionDO {
       case "clear": {
         await this.state.storage.delete("session");
         return Response.json(emptyState());
+      }
+
+      case "addBotMessages": {
+        const incoming = Array.isArray(body.items)
+          ? (body.items as unknown[]).filter(
+              (value): value is number => typeof value === "number" && value > 0,
+            )
+          : [];
+        if (incoming.length === 0) return Response.json({ count: 0 });
+
+        const existing = (await this.state.storage.get<number[]>(MESSAGES_KEY)) ?? [];
+        const merged = [...existing, ...incoming].slice(-MAX_TRACKED_MESSAGES);
+        await this.state.storage.put(MESSAGES_KEY, merged);
+        return Response.json({ count: merged.length });
+      }
+
+      case "getBotMessages": {
+        const list = (await this.state.storage.get<number[]>(MESSAGES_KEY)) ?? [];
+        return Response.json(list);
+      }
+
+      case "clearBotMessages": {
+        await this.state.storage.delete(MESSAGES_KEY);
+        return Response.json({ count: 0 });
       }
 
       default:

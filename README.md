@@ -79,6 +79,7 @@ The bot registers these in Telegram's command menu, so typing `/` shows the list
 | `/status` | — | Show the current session: page, title, material size, audio, image |
 | `/done` | `/selesai` | Build the entry in Notion |
 | `/cancel` | `/batal` | Clear the current session |
+| `/clearchat` | `/bersihkan` | Delete the bot's messages in this chat (only its own, within 48 h) |
 | `/help` | — | Show help |
 
 ## Browsing a page
@@ -113,6 +114,13 @@ with the same three-step order, so a hierarchy like
 Nothing is modified on the Notion side. Notion media URLs are signed and expire after roughly an
 hour, so they are fetched immediately and never stored; if a URL has already expired the bot falls
 back to sending the link as text.
+
+## Clearing the chat
+
+`/clearchat` (alias `/bersihkan`) deletes the messages the bot sent in this chat. Telegram only
+allows a bot to delete its own messages, and only within 48 hours, so older messages are counted as
+skipped. Your own messages stay. IDs are remembered from now on; messages sent before this feature
+was deployed cannot be removed by the bot.
 
 ---
 

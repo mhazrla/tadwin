@@ -24,12 +24,12 @@ import {
   deleteMessage,
   downloadFile,
   editMessageText,
-  sendAudio,
-  sendDocument,
-  sendHtml,
-  sendKeyboardMessage,
-  sendMessage,
-  sendPhoto,
+  sendAudio as tgSendAudio,
+  sendDocument as tgSendDocument,
+  sendHtml as tgSendHtml,
+  sendKeyboardMessage as tgSendKeyboardMessage,
+  sendMessage as tgSendMessage,
+  sendPhoto as tgSendPhoto,
   setMyCommands,
   setWebhook,
   type InlineButton,
@@ -52,6 +52,7 @@ const HELP =
   "/title  set the entry title\n" +
   "/status  show the current session\n" +
   "/cancel  clear the session\n" +
+  "/clearchat  delete the bot's messages in this chat\n" +
   "/done  build the entry in Notion\n" +
   "/help  show this message";
 
@@ -63,8 +64,71 @@ const COMMANDS = [
   { command: "status", description: "Show the current session" },
   { command: "done", description: "Build the entry in Notion" },
   { command: "cancel", description: "Clear the current session" },
+  { command: "clearchat", description: "Delete the bot's messages in this chat" },
   { command: "help", description: "Show help" },
 ];
+
+/**
+ * Every outbound message goes through these wrappers so its ID can be stored.
+ * /clearchat later replays that list through deleteMessage.
+ */
+async function rememberMessages(
+  env: Env,
+  chatId: number,
+  ids: Array<number | undefined>,
+): Promise<void> {
+  const list = ids.filter((id): id is number => typeof id === "number" && id > 0);
+  if (list.length === 0) return;
+  try {
+    await sessionCall(env, chatId, { op: "addBotMessages", items: list });
+  } catch (error) {
+    console.error("remember messages failed", messageOf(error));
+  }
+}
+
+async function sendMessage(env: Env, chatId: number, text: string): Promise<void> {
+  await rememberMessages(env, chatId, await tgSendMessage(env, chatId, text));
+}
+
+async function sendKeyboardMessage(
+  env: Env,
+  chatId: number,
+  text: string,
+  buttons: InlineButton[][],
+): Promise<void> {
+  await rememberMessages(env, chatId, [await tgSendKeyboardMessage(env, chatId, text, buttons)]);
+}
+
+async function sendHtml(env: Env, chatId: number, blocks: string[]): Promise<void> {
+  await rememberMessages(env, chatId, await tgSendHtml(env, chatId, blocks));
+}
+
+async function sendPhoto(
+  env: Env,
+  chatId: number,
+  url: string,
+  caption?: string,
+): Promise<void> {
+  await rememberMessages(env, chatId, [await tgSendPhoto(env, chatId, url, caption)]);
+}
+
+async function sendAudio(
+  env: Env,
+  chatId: number,
+  url: string,
+  caption?: string,
+): Promise<void> {
+  await rememberMessages(env, chatId, [await tgSendAudio(env, chatId, url, caption)]);
+}
+
+async function sendDocument(
+  env: Env,
+  chatId: number,
+  url: string,
+  caption?: string,
+): Promise<void> {
+  await rememberMessages(env, chatId, [await tgSendDocument(env, chatId, url, caption)]);
+}
 
 const AUDIO_UNSUPPORTED =
   "That audio format is not supported by Notion. Send it as mp3, m4a, ogg, wav, or webm.";
@@ -273,6 +337,11 @@ async function handleCommand(env: Env, chatId: number, text: string): Promise<vo
       await sendMessage(env, chatId, "Session cleared. \u{1F5D1}");
       return;
 
+    case "/clearchat":
+    case "/bersihkan":
+      await handleClearChat(env, chatId);
+      return;
+
     case "/done":
     case "/selesai":
       await sendMessage(env, chatId, "Processing... \u23F3");
@@ -344,6 +413,58 @@ function buildListPage(
     text: `${cfg.noun} (${items.length}) — page ${safePage + 1}/${pages}\n${cfg.hint}`,
     keyboard,
   };
+}
+
+/** Read the stored bot message IDs without pretending they are a session object. */
+async function botMessages(env: Env, chatId: number): Promise<number[]> {
+  const stub = env.SESSIONS.get(env.SESSIONS.idFromName(`chat:${chatId}`));
+  const resp = await stub.fetch("https://do/", {
+    method: "POST",
+    body: JSON.stringify({ op: "getBotMessages" }),
+  });
+  if (!resp.ok) return [];
+  const data = (await resp.json()) as unknown;
+  return Array.isArray(data) ? data.filter((value): value is number => typeof value === "number") : [];
+}
+
+/**
+ * Delete the bot's own messages in this chat. Telegram only lets a bot delete
+ * messages it sent, and only within 48 hours, so older ones are counted as
+ * skipped rather than retried forever.
+ */
+async function handleClearChat(env: Env, chatId: number): Promise<void> {
+  const ids = await botMessages(env, chatId);
+  if (ids.length === 0) {
+    await sendMessage(env, chatId, "Nothing to clear in this chat.");
+    return;
+  }
+
+  const started = Date.now();
+  let deleted = 0;
+  let skipped = 0;
+  let index = 0;
+
+  for (; index < ids.length; index++) {
+    // ctx.waitUntil is about 30 s; stop early so the report still gets through.
+    if (Date.now() - started > 20000) break;
+    try {
+      await deleteMessage(env, chatId, ids[index]);
+      deleted++;
+    } catch {
+      skipped++;
+    }
+  }
+
+  const remaining = ids.slice(index);
+  await sessionCall(env, chatId, { op: "clearBotMessages" });
+  if (remaining.length > 0) {
+    await sessionCall(env, chatId, { op: "addBotMessages", items: remaining });
+  }
+
+  const parts = [`Deleted ${deleted} message(s).`];
+  if (skipped > 0) parts.push(`${skipped} could not be deleted (older than 48 hours).`);
+  if (remaining.length > 0) parts.push(`${remaining.length} left, send /clearchat again.`);
+  await sendMessage(env, chatId, parts.join(" "));
 }
 
 /** The one browse entry point: read a page and show whatever it contains. */
