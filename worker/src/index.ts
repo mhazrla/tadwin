@@ -820,7 +820,7 @@ async function handleSearch(env: Env, chatId: number, arg: string): Promise<void
       const chunk = items.slice(i, i + size);
       const res = await Promise.allSettled(chunk.map(fn));
       out.push(...res);
-      if (i + size < items.length) await new Promise((r) => setTimeout(r, 300));
+      if (i + size < items.length) await new Promise((r) => setTimeout(r, 150));
     }
     return out;
   }
@@ -834,28 +834,18 @@ async function handleSearch(env: Env, chatId: number, arg: string): Promise<void
     if (haystack.includes(lower) && !titleSecIdx.includes(i)) contentSecIdx.push(i);
   });
 
-  const contentPagIdx: number[] = [];
-  const pagResults = await batched(pagToCheck, (p) => getSectionContent(env, p.id));
-  pagResults.forEach((r, i) => {
-    if (r.status !== "fulfilled") return;
-    const c = r.value;
-    const haystack = (c.html ?? []).join("\n").toLowerCase();
-    if (haystack.includes(lower) && !titlePagIdx.includes(i)) contentPagIdx.push(i);
-  });
-
-  if (contentSecIdx.length || contentPagIdx.length) {
+  if (contentSecIdx.length) {
     const keyboard: InlineButton[][] = [];
     for (const i of contentSecIdx) keyboard.push([{ text: buttonLabel(sections[i].title), callback_data: `ret:${i}` }]);
-    for (const i of contentPagIdx) keyboard.push([{ text: buttonLabel(pages[i].title), callback_data: `open:${i}` }]);
     await sendKeyboardMessage(
       env,
       chatId,
-      `Search "${keyword}" - also in content: ${contentSecIdx.length} section(s), ${contentPagIdx.length} page(s)`,
+      `Search "${keyword}" - also in content: ${contentSecIdx.length} section(s)`,
       keyboard,
     );
   }
 
-  if (!titleSecIdx.length && !titlePagIdx.length && !contentSecIdx.length && !contentPagIdx.length) {
+  if (!titleSecIdx.length && !titlePagIdx.length && !contentSecIdx.length) {
     await sendMessage(env, chatId, `No matches for "${keyword}".`);
   }
 }
