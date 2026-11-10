@@ -35,6 +35,10 @@ export interface SessionState {
   sectionsPageId: string | null;
   pages: PageRef[];
   pagesPageId: string | null;
+  homePageId: string | null;
+  navStack: string[];
+  listKind: "sections" | "pages" | null;
+  listPage: number;
 }
 
 export function emptyState(): SessionState {
@@ -49,6 +53,10 @@ export function emptyState(): SessionState {
     sectionsPageId: null,
     pages: [],
     pagesPageId: null,
+    homePageId: null,
+    navStack: [],
+    listKind: null,
+    listPage: 0,
   };
 }
 
@@ -102,6 +110,8 @@ export class SessionDO {
           sectionsPageId: null,
           pages: [],
           pagesPageId: null,
+          listKind: null,
+          listPage: 0,
         };
         await this.state.storage.put("session", next);
         return Response.json(next);
@@ -137,6 +147,27 @@ export class SessionDO {
 
       case "clearPages": {
         const next: SessionState = { ...current, pages: [], pagesPageId: null };
+        await this.state.storage.put("session", next);
+        return Response.json(next);
+      }
+
+      case "setHome": {
+        const next: SessionState = { ...current, homePageId: (body.homePageId as string) ?? null };
+        await this.state.storage.put("session", next);
+        return Response.json(next);
+      }
+
+      case "setNavStack": {
+        const items = Array.isArray(body.items) ? (body.items as string[]) : [];
+        const next: SessionState = { ...current, navStack: items };
+        await this.state.storage.put("session", next);
+        return Response.json(next);
+      }
+
+      case "setListState": {
+        const kind = body.kind === "sections" || body.kind === "pages" ? body.kind : null;
+        const page = typeof body.page === "number" ? body.page : 0;
+        const next: SessionState = { ...current, listKind: kind, listPage: page };
         await this.state.storage.put("session", next);
         return Response.json(next);
       }

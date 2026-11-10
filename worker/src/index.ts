@@ -387,12 +387,13 @@ const LIST_KIND: Record<
   pages: { pagePrefix: "pgp:", itemPrefix: "open:", noun: "Pages", hint: "Tap one to open it:" },
 };
 
-/** One page of a list: 8 entries, an optional switch row, then Prev / page / Next. */
+/** One page of a list: 8 entries, an optional switch row, then Prev / page / Next, then nav. */
 function buildListPage(
   items: Array<{ title: string }>,
   page: number,
   kind: ListKind,
   switchTo?: { label: string; data: string },
+  flags?: { back?: boolean; home?: boolean },
 ): ListPage {
   const cfg = LIST_KIND[kind];
   const pages = Math.max(1, Math.ceil(items.length / BUTTONS_PER_PAGE));
@@ -417,6 +418,11 @@ function buildListPage(
     nav.push({ text: "Next ▶", callback_data: `${cfg.pagePrefix}${safePage + 1}` });
   }
   keyboard.push(nav);
+
+  const extra: InlineButton[] = [];
+  if (flags?.back) extra.push({ text: "◀ Back", callback_data: "back" });
+  if (flags?.home) extra.push({ text: "🏠 Home", callback_data: "home" });
+  if (extra.length) keyboard.push(extra);
 
   return {
     text: `${cfg.noun} (${items.length}) — page ${safePage + 1}/${pages}\n${cfg.hint}`,
@@ -465,6 +471,20 @@ async function setLastDone(env: Env, chatId: number, value: number): Promise<voi
     method: "POST",
     body: JSON.stringify({ op: "setLastDone", value }),
   });
+}
+
+async function sendNavButtons(env: Env, chatId: number): Promise<void> {
+  const session = await sessionCall(env, chatId, { op: "get" });
+  const row: InlineButton[] = [];
+  const backAvail =
+    session.listKind !== null ||
+    (session.navStack?.length ?? 0) > 0 ||
+    (session.homePageId !== null && session.pageId !== session.homePageId);
+  const homeAvail = session.homePageId !== null && session.pageId !== session.homePageId;
+  if (backAvail) row.push({ text: "Back", callback_data: "back" });
+  if (homeAvail) row.push({ text: "Home", callback_data: "home" });
+  if (row.length === 0) return;
+  await sendKeyboardMessage(env, chatId, "Navigation", [row]);
 }
 
 /** Read the stored bot message IDs without pretending they are a session object. */
@@ -550,6 +570,14 @@ async function handleBrowse(env: Env, chatId: number, arg: string): Promise<void
     return;
   }
 
+  await sessionCall(env, chatId, {
+    op: "setPage",
+    pageId,
+    pageUrl: `https://www.notion.so/${pageId.replace(/-/g, "")}`,
+  });
+  await sessionCall(env, chatId, { op: "setHome", homePageId: pageId });
+  await sessionCall(env, chatId, { op: "setNavStack", items: [] });
+
   await browsePage(env, chatId, pageId);
 }
 
@@ -575,6 +603,10 @@ async function openPage(
     }
   }
 
+  const stack = [...(session.navStack ?? [])];
+  if (session.pageId) stack.push(session.pageId);
+  await sessionCall(env, chatId, { op: "setNavStack", items: stack });
+
   await sessionCall(env, chatId, {
     op: "setPage",
     pageId: page.id,
@@ -591,17 +623,23 @@ async function openPage(
  * When both sections and child pages exist, sections win and a switch row is added.
  */
 async function browsePage(env: Env, chatId: number, pageId: string): Promise<void> {
+  const session = await sessionCall(env, chatId, { op: "get" });
+  const homePageId = session.homePageId;
+  const navStack = session.navStack ?? [];
+  const backAvail = navStack.length > 0 || (homePageId !== null && pageId !== homePageId);
+  const homeAvail = homePageId !== null && pageId !== homePageId;
+  const flags = { back: backAvail, home: homeAvail };
+
   let sections: SectionRef[];
   let pages: PageRef[];
   try {
     ({ sections, pages } = await listPageContent(env, pageId));
   } catch (error) {
     console.error("read page failed", error);
-      await sendMessage(env, chatId, "Could not read that page. See logs for details.");
+    await sendMessage(env, chatId, "Could not read that page. See logs for details.");
     return;
   }
 
-  // Cache both lists so pagination and the switch row can work without refetching.
   await sessionCall(env, chatId, {
     op: sections.length ? "setSections" : "clearSections",
     pageId,
@@ -614,27 +652,29 @@ async function browsePage(env: Env, chatId: number, pageId: string): Promise<voi
   });
 
   if (sections.length) {
-    const built = buildListPage(sections, 0, "sections", switchFor("sections", pages.length));
+    await sessionCall(env, chatId, { op: "setListState", kind: "sections", page: 0 });
+    const built = buildListPage(sections, 0, "sections", switchFor("sections", pages.length), flags);
     await sendKeyboardMessage(env, chatId, built.text, built.keyboard);
     return;
   }
 
   if (pages.length) {
-    const built = buildListPage(pages, 0, "pages");
+    await sessionCall(env, chatId, { op: "setListState", kind: "pages", page: 0 });
+    const built = buildListPage(pages, 0, "pages", undefined, flags);
     await sendKeyboardMessage(env, chatId, built.text, built.keyboard);
     return;
   }
 
-  // Leaf page: send its own content.
   let content: SectionContent;
   try {
     content = await getSectionContent(env, pageId);
   } catch (error) {
     console.error("read page failed", error);
-      await sendMessage(env, chatId, "Could not read that page. See logs for details.");
+    await sendMessage(env, chatId, "Could not read that page. See logs for details.");
     return;
   }
   await sendContent(env, chatId, content);
+  await sendNavButtons(env, chatId);
 }
 
 /** The "show me the other kind" row, or undefined when there is nothing to switch to. */
@@ -647,6 +687,54 @@ function switchFor(
     return { label: `Pages (${otherCount})`, data: "mode:pages" };
   }
   return { label: `Sections (${otherCount})`, data: "mode:sections" };
+}
+
+async function handleBack(env: Env, chatId: number): Promise<void> {
+  const session = await sessionCall(env, chatId, { op: "get" });
+  const stack = [...(session.navStack ?? [])];
+
+  if (stack.length > 0) {
+    const parent = stack.pop() as string;
+    await sessionCall(env, chatId, { op: "setNavStack", items: stack });
+    await sessionCall(env, chatId, {
+      op: "setPage",
+      pageId: parent,
+      pageUrl: `https://www.notion.so/${parent.replace(/-/g, "")}`,
+    });
+    await browsePage(env, chatId, parent);
+    return;
+  }
+
+  if (session.homePageId && session.pageId !== session.homePageId) {
+    await sessionCall(env, chatId, { op: "setNavStack", items: [] });
+    await sessionCall(env, chatId, {
+      op: "setPage",
+      pageId: session.homePageId,
+      pageUrl: `https://www.notion.so/${session.homePageId.replace(/-/g, "")}`,
+    });
+    await browsePage(env, chatId, session.homePageId);
+    return;
+  }
+
+  if (session.pageId) {
+    await browsePage(env, chatId, session.pageId);
+  }
+}
+
+async function handleHome(env: Env, chatId: number): Promise<void> {
+  const session = await sessionCall(env, chatId, { op: "get" });
+  const home = session.homePageId ?? session.pageId;
+  if (!home) {
+    await sendMessage(env, chatId, "No page browsed yet.");
+    return;
+  }
+  await sessionCall(env, chatId, { op: "setNavStack", items: [] });
+  await sessionCall(env, chatId, {
+    op: "setPage",
+    pageId: home,
+    pageUrl: `https://www.notion.so/${home.replace(/-/g, "")}`,
+  });
+  await browsePage(env, chatId, home);
 }
 
 async function handleCallback(env: Env, query: TgCallbackQuery): Promise<void> {
@@ -662,6 +750,20 @@ async function handleCallback(env: Env, query: TgCallbackQuery): Promise<void> {
 
   if (data === "cur") {
     await answerCallbackQuery(env, query.id);
+    return;
+  }
+
+  if (data === "back" || data === "home") {
+    if (query.message?.message_id) {
+      try {
+        await deleteMessage(env, chatId, query.message.message_id);
+      } catch (error) {
+        console.error("delete list failed", messageOf(error));
+      }
+    }
+    await answerCallbackQuery(env, query.id);
+    if (data === "back") await handleBack(env, chatId);
+    else await handleHome(env, chatId);
     return;
   }
 
@@ -718,13 +820,20 @@ async function renderList(
   const session = await sessionCall(env, chatId, { op: "get" });
   const items = kind === "sections" ? session.sections : session.pages;
   const otherCount = kind === "sections" ? session.pages.length : session.sections.length;
+  const homePageId = session.homePageId;
+  const navStack = session.navStack ?? [];
+  const backAvail = navStack.length > 0 || (homePageId !== null && session.pageId !== homePageId);
+  const homeAvail = homePageId !== null && session.pageId !== homePageId;
+  const flags = { back: backAvail, home: homeAvail };
 
   if (items.length === 0) {
     await sendMessage(env, chatId, "That list has expired. Send /browse again.");
     return;
   }
 
-  const built = buildListPage(items, page, kind, switchFor(kind, otherCount));
+  await sessionCall(env, chatId, { op: "setListState", kind, page });
+
+  const built = buildListPage(items, page, kind, switchFor(kind, otherCount), flags);
   if (!messageId) {
     await sendKeyboardMessage(env, chatId, built.text, built.keyboard);
     return;
@@ -772,6 +881,7 @@ async function retrieveSection(
   }
 
   await sendContent(env, chatId, content);
+  await sendNavButtons(env, chatId);
 }
 
 /** Audio, then image, then the formatted text for one block or page. */
