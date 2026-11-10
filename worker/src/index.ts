@@ -7,6 +7,7 @@ import {
   extractTitle,
   parsePageId,
   TEXT_EXT,
+  type Block,
 } from "./format";
 import {
   appendEntry,
@@ -60,9 +61,10 @@ const HELP =
 const COMMANDS = [
   { command: "start", description: "How to use the bot" },
   { command: "browse", description: "Browse pages and entries" },
+  { command: "search", description: "Search sections and pages" },
   { command: "title", description: "Set the entry title" },
   { command: "status", description: "Show the current session" },
-  { command: "done", description: "Build the entry in Notion" },
+  { command: "done", description: "Preview and build the entry" },
   { command: "cancel", description: "Clear the current session" },
   { command: "clearchat", description: "Delete the bot's messages in this chat" },
   { command: "help", description: "Show help" },
@@ -86,8 +88,10 @@ async function rememberMessages(
   }
 }
 
-async function sendMessage(env: Env, chatId: number, text: string): Promise<void> {
-  await rememberMessages(env, chatId, await tgSendMessage(env, chatId, text));
+async function sendMessage(env: Env, chatId: number, text: string): Promise<number[]> {
+  const ids = await tgSendMessage(env, chatId, text);
+  await rememberMessages(env, chatId, ids);
+  return ids;
 }
 
 async function sendKeyboardMessage(
@@ -344,16 +348,14 @@ async function handleCommand(env: Env, chatId: number, text: string): Promise<vo
 
     case "/done":
     case "/selesai": {
-      const last = await lastDone(env, chatId);
-      const now = Date.now();
-      if (now - last < DONE_COOLDOWN_MS) {
-        const wait = Math.ceil((DONE_COOLDOWN_MS - (now - last)) / 1000);
-        await sendMessage(env, chatId, `Please wait ${wait} seconds before running /done again.`);
-        return;
-      }
-      await setLastDone(env, chatId, now);
-      await sendMessage(env, chatId, "Processing... \u23F3");
-      await processEntry(env, chatId);
+      await handlePreview(env, chatId);
+      return;
+    }
+
+    case "/search":
+    case "/cari": {
+      const value = text.replace(/^\/(?:search|cari)(@\w+)?\s*/i, "").trim();
+      await handleSearch(env, chatId, value);
       return;
     }
 
@@ -737,6 +739,121 @@ async function handleHome(env: Env, chatId: number): Promise<void> {
   await browsePage(env, chatId, home);
 }
 
+async function handleSearch(env: Env, chatId: number, arg: string): Promise<void> {
+  // Optional link prefix: "/search <link> <keyword>".
+  let pageId: string | null = null;
+  let keyword = arg.trim();
+  const linkMatch = arg.match(URL_RE);
+  if (linkMatch) {
+    try {
+      pageId = parsePageId(linkMatch[0]);
+      keyword = arg.replace(linkMatch[0], "").trim();
+    } catch {
+      await sendMessage(env, chatId, "That Notion link is not valid.");
+      return;
+    }
+  }
+
+  if (!keyword) {
+    await sendMessage(env, chatId, "Usage: /search <keyword>  (or /search <link> <keyword>)");
+    return;
+  }
+
+  if (!pageId) {
+    const session = await sessionCall(env, chatId, { op: "get" });
+    pageId = session.pageId;
+  }
+  if (!pageId) {
+    await sendMessage(env, chatId, "No Notion page yet. Send a page link, or /search <link> <keyword>.");
+    return;
+  }
+
+  const lower = keyword.toLowerCase();
+
+  // Make sure lists are cached.
+  let sections: SectionRef[];
+  let pages: PageRef[];
+  try {
+    ({ sections, pages } = await listPageContent(env, pageId));
+  } catch (error) {
+    console.error("read page failed", error);
+    await sendMessage(env, chatId, "Could not read that page. See logs for details.");
+    return;
+  }
+  await sessionCall(env, chatId, { op: sections.length ? "setSections" : "clearSections", pageId, items: sections });
+  await sessionCall(env, chatId, { op: pages.length ? "setPages" : "clearPages", pageId, items: pages });
+
+  // Search titles first (cheap), then content in parallel (capped).
+  const titleSections = sections.filter((s) => s.title.toLowerCase().includes(lower));
+  const titlePages = pages.filter((p) => p.title.toLowerCase().includes(lower));
+
+  const contentSectionIdx: number[] = [];
+  const contentPageIdx: number[] = [];
+
+  const cap = 20;
+  const secToCheck = sections.slice(0, cap);
+  const pagToCheck = pages.slice(0, cap);
+
+  async function batched(items: any[], fn: (x: any) => Promise<any>) {
+    const out = [];
+    const size = 5;
+    for (let i = 0; i < items.length; i += size) {
+      const chunk = items.slice(i, i + size);
+      const res = await Promise.allSettled(chunk.map(fn));
+      out.push(...res);
+      if (i + size < items.length) await new Promise((r) => setTimeout(r, 250));
+    }
+    return out;
+  }
+
+  const secResults = await batched(secToCheck, (s) => getSectionContent(env, s.id));
+  secResults.forEach((r, i) => {
+    if (r.status !== "fulfilled") return;
+    const c = r.value;
+    const haystack = (c.html ?? []).join("\n").toLowerCase();
+    if (haystack.includes(lower) && !titleSections.includes(sections[i])) {
+      contentSectionIdx.push(i);
+    }
+  });
+
+  const pagResults = await batched(pagToCheck, (p) => getSectionContent(env, p.id));
+  pagResults.forEach((r, i) => {
+    if (r.status !== "fulfilled") return;
+    const c = r.value;
+    const haystack = (c.html ?? []).join("\n").toLowerCase();
+    if (haystack.includes(lower) && !titlePages.includes(pages[i])) {
+      contentPageIdx.push(i);
+    }
+  });
+
+  const matchedSections = [
+    ...titleSections.map((s) => sections.indexOf(s)),
+    ...contentSectionIdx,
+  ];
+  // dedupe
+  const uniqSec = [...new Set(matchedSections)];
+  const uniqPag = [...new Set([...titlePages.map((p) => pages.indexOf(p)), ...contentPageIdx])];
+
+  if (uniqSec.length === 0 && uniqPag.length === 0) {
+    await sendMessage(env, chatId, `No matches for "${keyword}".`);
+    return;
+  }
+
+  const lines: string[] = [`Search "${keyword}" - ${uniqSec.length} section(s), ${uniqPag.length} page(s)`];
+  const keyboard: InlineButton[][] = [];
+
+  for (const i of uniqSec) {
+    const s = sections[i];
+    keyboard.push([{ text: buttonLabel(s.title), callback_data: `ret:${i}` }]);
+  }
+  for (const i of uniqPag) {
+    const p = pages[i];
+    keyboard.push([{ text: buttonLabel(p.title), callback_data: `open:${i}` }]);
+  }
+
+  await sendKeyboardMessage(env, chatId, lines[0], keyboard);
+}
+
 async function handleCallback(env: Env, query: TgCallbackQuery): Promise<void> {
   const chatId = query.message?.chat?.id;
   if (!chatId) return;
@@ -771,6 +888,46 @@ async function handleCallback(env: Env, query: TgCallbackQuery): Promise<void> {
     const kind = data.slice(5) === "pages" ? "pages" : "sections";
     await answerCallbackQuery(env, query.id);
     await renderList(env, chatId, query.message?.message_id, kind, 0);
+    return;
+  }
+
+  if (data === "confirm:done") {
+    if (query.message?.message_id) {
+      try { await deleteMessage(env, chatId, query.message.message_id); } catch (error) { console.error("delete list failed", messageOf(error)); }
+    }
+    await answerCallbackQuery(env, query.id, "Building...");
+    await handleConfirmDone(env, chatId);
+    return;
+  }
+
+  if (data === "edit:title") {
+    if (query.message?.message_id) {
+      try { await deleteMessage(env, chatId, query.message.message_id); } catch (error) { console.error("delete list failed", messageOf(error)); }
+    }
+    await sessionCall(env, chatId, { op: "setAwaitingEdit", value: "title" });
+    await answerCallbackQuery(env, query.id);
+    await sendMessage(env, chatId, "Send the new title (supports **bold** / *italic*):");
+    return;
+  }
+
+  if (data === "edit:material") {
+    if (query.message?.message_id) {
+      try { await deleteMessage(env, chatId, query.message.message_id); } catch (error) { console.error("delete list failed", messageOf(error)); }
+    }
+    await sessionCall(env, chatId, { op: "setAwaitingEdit", value: "material" });
+    await answerCallbackQuery(env, query.id);
+    await sendMessage(env, chatId, "Send the new material (text or a .txt file):");
+    return;
+  }
+
+  if (data === "cancel:preview") {
+    if (query.message?.message_id) {
+      try { await deleteMessage(env, chatId, query.message.message_id); } catch (error) { console.error("delete list failed", messageOf(error)); }
+    }
+    await sessionCall(env, chatId, { op: "clearPendingBlocks" });
+    await sessionCall(env, chatId, { op: "setAwaitingEdit", value: null });
+    await answerCallbackQuery(env, query.id);
+    await sendMessage(env, chatId, "Cancelled.");
     return;
   }
 
@@ -934,6 +1091,24 @@ async function handleText(env: Env, chatId: number, msg: TgMessage): Promise<voi
   const raw = typeof msg.text === "string" ? msg.text.trim() : "";
   // Telegram sends formatting as entities, not as characters.
   const text = entitiesToMarkdown(raw, msg.entities);
+
+  const session = await sessionCall(env, chatId, { op: "get" });
+  if (session.awaitingEdit === "title") {
+    await sessionCall(env, chatId, { op: "setTitle", title: text });
+    await sessionCall(env, chatId, { op: "setAwaitingEdit", value: null });
+    await sendMessage(env, chatId, "Title updated.");
+    await handlePreview(env, chatId);
+    return;
+  }
+  if (session.awaitingEdit === "material") {
+    await sessionCall(env, chatId, { op: "clearMaterials" });
+    await sessionCall(env, chatId, { op: "push", field: "materials", value: text });
+    await sessionCall(env, chatId, { op: "setAwaitingEdit", value: null });
+    await sendMessage(env, chatId, "Material updated (" + text.length + " characters).");
+    await handlePreview(env, chatId);
+    return;
+  }
+
   const match = raw.match(URL_RE);
   if (match) {
     try {
@@ -982,6 +1157,17 @@ async function handleDocument(env: Env, chatId: number, msg: TgMessage): Promise
         await sendMessage(env, chatId, `That file is too long (${text.length} characters). Limit is ${MAX_MATERIAL_CHARS}.`);
         return;
       }
+
+      const sess = await sessionCall(env, chatId, { op: "get" });
+      if (sess.awaitingEdit === "material") {
+        await sessionCall(env, chatId, { op: "clearMaterials" });
+        await sessionCall(env, chatId, { op: "push", field: "materials", value: text });
+        await sessionCall(env, chatId, { op: "setAwaitingEdit", value: null });
+        await sendMessage(env, chatId, "Material updated from file (" + text.length + " characters).");
+        await handlePreview(env, chatId);
+        return;
+      }
+
       await sessionCall(env, chatId, { op: "push", field: "materials", value: text });
       await sendMessage(
         env,
@@ -1099,7 +1285,7 @@ async function handleVideo(env: Env, chatId: number, media: TgMedia): Promise<vo
   await sendMessage(env, chatId, "Audio received. \u{1F3A7}");
 }
 
-async function processEntry(env: Env, chatId: number): Promise<void> {
+async function handlePreview(env: Env, chatId: number): Promise<void> {
   const session = await sessionCall(env, chatId, { op: "get" });
   if (!session.pageId) {
     await sendMessage(env, chatId, "No Notion page link yet.");
@@ -1113,6 +1299,8 @@ async function processEntry(env: Env, chatId: number): Promise<void> {
   const material = session.materials.join("\n\n").trim();
   const title = session.title?.trim() || extractTitle(material);
 
+  await sendMessage(env, chatId, "Preparing preview...");
+
   try {
     const references = await findToggleExamples(env, session.pageId);
     if (references.length === 0) {
@@ -1125,9 +1313,104 @@ async function processEntry(env: Env, chatId: number): Promise<void> {
       return;
     }
 
-    // AI and media uploads run in parallel so the total stays inside waitUntil.
-    const blocksPromise = formatMaterial(env, material, title, references);
+    const blocks = await formatMaterial(env, material, title, references);
 
+    await sessionCall(env, chatId, { op: "setPendingBlocks", items: blocks });
+    await sessionCall(env, chatId, { op: "setAwaitingEdit", value: null });
+
+    const typeCounts: Record<string, number> = {};
+    for (const b of blocks) {
+      const t = (b as { type?: string }).type ?? "paragraph";
+      typeCounts[t] = (typeCounts[t] ?? 0) + 1;
+    }
+    const summary = Object.entries(typeCounts)
+      .map(([t, n]) => `${t} x${n}`)
+      .join(", ");
+
+    const audioCount = session.audios.length;
+    const imageCount = session.images.length;
+
+    const previewText =
+      "Preview\n" +
+      `Title: ${title}\n` +
+      `Material: ${material.length} chars\n` +
+      `Audio: ${audioCount}  Image: ${imageCount}\n` +
+      `Blocks: ${blocks.length} (${summary})`;
+
+    const buttons: InlineButton[][] = [
+      [
+        { text: "Send", callback_data: "confirm:done" },
+        { text: "Edit title", callback_data: "edit:title" },
+        { text: "Edit material", callback_data: "edit:material" },
+      ],
+      [{ text: "Cancel", callback_data: "cancel:preview" }],
+    ];
+
+    await sendKeyboardMessage(env, chatId, previewText, buttons);
+  } catch (error) {
+    console.error("handlePreview failed", error);
+    let message = messageOf(error).slice(0, 200);
+    await sendMessage(env, chatId, `Failed: ${message}`);
+  }
+}
+
+async function handleConfirmDone(env: Env, chatId: number): Promise<void> {
+  const session = await sessionCall(env, chatId, { op: "get" });
+  if (!session.pageId) {
+    await sendMessage(env, chatId, "No Notion page link yet.");
+    return;
+  }
+  if (session.materials.length === 0) {
+    await sendMessage(env, chatId, "No text material yet.");
+    return;
+  }
+
+  const last = await lastDone(env, chatId);
+  const now = Date.now();
+  if (now - last < DONE_COOLDOWN_MS) {
+    const wait = Math.ceil((DONE_COOLDOWN_MS - (now - last)) / 1000);
+    await sendMessage(env, chatId, `Please wait ${wait} seconds before running /done again.`);
+    return;
+  }
+  await setLastDone(env, chatId, now);
+
+  const material = session.materials.join("\n\n").trim();
+  const title = session.title?.trim() || extractTitle(material);
+
+  const progressIds = await sendMessage(env, chatId, "Building entry...");
+  const progressId = progressIds[0];
+  async function setProgress(text: string): Promise<void> {
+    if (!progressId) return;
+    try {
+      await editMessageText(env, chatId, progressId, text);
+    } catch (error) {
+      console.error("progress edit failed", error);
+    }
+  }
+
+  try {
+    const references = await findToggleExamples(env, session.pageId);
+    if (references.length === 0) {
+      await setProgress("No example entry found.");
+      await sendMessage(
+        env,
+        chatId,
+        "This page has no example entry (toggle heading) yet. " +
+          "Add one so the format can be copied, then run /done again.",
+      );
+      return;
+    }
+
+    await setProgress("Formatting material...");
+    let blocks: Block[];
+    const pending = session.pendingBlocks;
+    if (Array.isArray(pending) && pending.length > 0) {
+      blocks = pending as Block[];
+    } else {
+      blocks = await formatMaterial(env, material, title, references);
+    }
+
+    await setProgress("Uploading media...");
     const audioPromise = (async (): Promise<string | null> => {
       if (session.audios.length === 0) return null;
       const audio = session.audios[0];
@@ -1142,12 +1425,9 @@ async function processEntry(env: Env, chatId: number): Promise<void> {
       return uploadFile(env, image.name, image.mime, file.bytes);
     })();
 
-    const [blocks, audioUploadId, imageUploadId] = await Promise.all([
-      blocksPromise,
-      audioPromise,
-      imagePromise,
-    ]);
+    const [audioUploadId, imageUploadId] = await Promise.all([audioPromise, imagePromise]);
 
+    await setProgress("Writing to Notion...");
     const imageCaption = session.images[0]?.caption ?? "";
 
     await appendEntry(
@@ -1160,6 +1440,7 @@ async function processEntry(env: Env, chatId: number): Promise<void> {
       blocks,
     );
 
+    await setProgress("Done.");
     await sendMessage(
       env,
       chatId,
@@ -1167,7 +1448,8 @@ async function processEntry(env: Env, chatId: number): Promise<void> {
     );
     await sessionCall(env, chatId, { op: "clear" });
   } catch (error) {
-    console.error("processEntry failed", error);
+    console.error("handleConfirmDone failed", error);
+    await setProgress("Failed.");
     let message = messageOf(error).slice(0, 200);
     if (/file size|size limit|too large|exceed/i.test(message)) {
       message += "\n\nNote: the Notion Free plan limits files to 5 MB.";
@@ -1175,6 +1457,7 @@ async function processEntry(env: Env, chatId: number): Promise<void> {
     await sendMessage(env, chatId, `Failed: ${message}`);
   }
 }
+
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

@@ -39,6 +39,8 @@ export interface SessionState {
   navStack: string[];
   listKind: "sections" | "pages" | null;
   listPage: number;
+  pendingBlocks: unknown[];
+  awaitingEdit: "title" | "material" | null;
 }
 
 export function emptyState(): SessionState {
@@ -57,6 +59,8 @@ export function emptyState(): SessionState {
     navStack: [],
     listKind: null,
     listPage: 0,
+    pendingBlocks: [],
+    awaitingEdit: null,
   };
 }
 
@@ -112,6 +116,8 @@ export class SessionDO {
           pagesPageId: null,
           listKind: null,
           listPage: 0,
+          pendingBlocks: [],
+          awaitingEdit: null,
         };
         await this.state.storage.put("session", next);
         return Response.json(next);
@@ -147,6 +153,32 @@ export class SessionDO {
 
       case "clearPages": {
         const next: SessionState = { ...current, pages: [], pagesPageId: null };
+        await this.state.storage.put("session", next);
+        return Response.json(next);
+      }
+
+      case "clearMaterials": {
+        const next: SessionState = { ...current, materials: [] };
+        await this.state.storage.put("session", next);
+        return Response.json(next);
+      }
+
+      case "setPendingBlocks": {
+        const items = Array.isArray(body.items) ? body.items : [];
+        const next: SessionState = { ...current, pendingBlocks: items };
+        await this.state.storage.put("session", next);
+        return Response.json(next);
+      }
+
+      case "clearPendingBlocks": {
+        const next: SessionState = { ...current, pendingBlocks: [] };
+        await this.state.storage.put("session", next);
+        return Response.json(next);
+      }
+
+      case "setAwaitingEdit": {
+        const value = body.value === "title" || body.value === "material" ? body.value : null;
+        const next: SessionState = { ...current, awaitingEdit: value };
         await this.state.storage.put("session", next);
         return Response.json(next);
       }

@@ -19,15 +19,31 @@ async function notion(
   path: string,
   init: RequestInit = {},
 ): Promise<Json> {
-  const resp = await fetch(`${API}${path}`, {
-    ...init,
-    headers: { ...baseHeaders(env), ...((init.headers as Record<string, string>) ?? {}) },
-  });
-  if (!resp.ok) {
+  const MAX_RETRIES = 2;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const resp = await fetch(`${API}${path}`, {
+      ...init,
+      headers: { ...baseHeaders(env), ...((init.headers as Record<string, string>) ?? {}) },
+    });
+    if (resp.ok) return (await resp.json()) as Json;
+
     const body = await resp.text();
+    if (resp.status === 429 && attempt < MAX_RETRIES) {
+      let wait = 1;
+      try {
+        const parsed = JSON.parse(body) as { additional_data?: { retry_after?: string | number } };
+        const ra = parsed?.additional_data?.retry_after;
+        if (ra !== undefined) wait = Math.max(1, Number(ra));
+      } catch {
+        const m = body.match(/retry_after["']?\s*:\s*"?(\d+)/);
+        if (m) wait = Math.max(1, Number(m[1]));
+      }
+      await new Promise((resolve) => setTimeout(resolve, Math.min(wait, 5) * 1000));
+      continue;
+    }
     throw new Error(`Notion API error ${resp.status}: ${body.slice(0, 500)}`);
   }
-  return (await resp.json()) as Json;
+  throw new Error("Notion API error: failed after retry");
 }
 
 function plain(block: Json): string {
