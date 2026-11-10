@@ -202,7 +202,7 @@ async function renderBlocks(
   media: MediaSink,
   inQuote = false,
 ): Promise<string[]> {
-  const lines: string[] = [];
+  const collected: { lines: string[]; isList: boolean }[] = [];
   let number = 0;
 
   for (const block of blocks) {
@@ -215,9 +215,18 @@ async function renderBlocks(
       number = 0;
     }
 
-    lines.push(...(await blockLines(env, block, depth, media, number, inQuote)));
+    const bl = await blockLines(env, block, depth, media, number, inQuote);
+    if (bl.length === 0) continue;
+    const isList = bl[0].startsWith("• ") || /^\d+\.\s/.test(bl[0]);
+    collected.push({ lines: bl, isList });
   }
-  return lines;
+
+  const out: string[] = [];
+  for (let i = 0; i < collected.length; i++) {
+    if (i > 0 && !collected[i].isList) out.push("");
+    out.push(...collected[i].lines);
+  }
+  return out;
 }
 
 async function blockLines(

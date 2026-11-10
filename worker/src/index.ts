@@ -39,6 +39,8 @@ import {
 export { SessionDO } from "./session";
 
 const URL_RE = /https?:\/\/(?:www\.)?(?:app\.)?notion\.(?:so|com)\/\S+/i;
+const DEFAULT_HOME_PAGE_ID = "2823c08b-b705-8081-968a-daeb8dcc4b33";
+const DEFAULT_HOME_PAGE_URL = "https://www.notion.so/2823c08bb7058081968adaeb8dcc4b33";
 
 const HELP =
   "How to use:\n" +
@@ -63,6 +65,7 @@ const HELP =
 /** Shown in Telegram's command menu (also registered via setMyCommands). */
 const COMMANDS = [
   { command: "start", description: "How to use the bot" },
+  { command: "home", description: "Open the default Notes page" },
   { command: "browse", description: "Browse pages and entries" },
   { command: "search", description: "Search sections and pages" },
   { command: "title", description: "Set the entry title" },
@@ -304,6 +307,10 @@ async function handleCommand(env: Env, chatId: number, text: string): Promise<vo
       );
       return;
     }
+
+    case "/home":
+      await handleBrowse(env, chatId, DEFAULT_HOME_PAGE_URL);
+      return;
 
     // /browse is the one entry point; the old names stay as aliases.
     case "/browse":
@@ -571,8 +578,7 @@ async function handleBrowse(env: Env, chatId: number, arg: string): Promise<void
   }
 
   if (!pageId) {
-    await sendMessage(env, chatId, "No Notion page yet. Send a page link, or /browse <link>.");
-    return;
+    pageId = DEFAULT_HOME_PAGE_ID;
   }
 
   await sessionCall(env, chatId, {
@@ -767,11 +773,7 @@ async function handleSearch(env: Env, chatId: number, arg: string): Promise<void
 
   if (!pageId) {
     const session = await sessionCall(env, chatId, { op: "get" });
-    pageId = session.pageId;
-  }
-  if (!pageId) {
-    await sendMessage(env, chatId, "No Notion page yet. Send a page link, or /search <link> <keyword>.");
-    return;
+    pageId = session.pageId ?? DEFAULT_HOME_PAGE_ID;
   }
 
   const lower = keyword.toLowerCase();
