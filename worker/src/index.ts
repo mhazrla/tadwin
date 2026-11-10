@@ -69,7 +69,6 @@ const HELP =
   "/search  search sections and pages by keyword\n" +
   "/add  start a new entry (guided title)\n" +
   "/skip  skip the title (auto-generate)\n" +
-  "/title  alias of /add\n" +
   "/status  show the current session\n" +
   "/cancel  clear the session\n" +
   "/clearchat  delete the bot's messages in this chat\n" +
@@ -344,14 +343,12 @@ async function handleCommand(env: Env, chatId: number, text: string): Promise<vo
     }
 
     case "/add":
-    case "/tambah":
-    case "/title":
-    case "/judul": {
+    case "/tambah": {
       if (!isAdmin(env, chatId)) {
         await sendMessage(env, chatId, READ_ONLY_MSG);
         return;
       }
-      const value = text.replace(/^\/(?:add|tambah|title|judul)(@\w+)?\s*/i, "").trim();
+      const value = text.replace(/^\/(?:add|tambah)(@\w+)?\s*/i, "").trim();
       if (value) {
         await sessionCall(env, chatId, { op: "setTitle", title: value });
         await sessionCall(env, chatId, { op: "setAwaitingTitle", value: false });
