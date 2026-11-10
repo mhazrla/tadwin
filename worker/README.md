@@ -73,6 +73,11 @@ stored. If a URL has expired, the bot sends the link as text instead.
 - A Notion integration token; the target page must be shared with that integration.
 - A Gemini API key from [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
 
+## Monitoring
+
+- **Logs**: `npx wrangler tail` (real-time) or Cloudflare Dashboard → Workers → `tadwin-bot` → Logs.
+- **Auto-alerts**: set `OWNER_CHAT_ID` (your Telegram chat_id) as a secret. The bot sends a short alert to that chat when an unexpected error, Notion failure, or AI failure occurs (deduped to 1 per 5 minutes). Get your chat_id via `@userinfobot`.
+
 ## Setup
 
 ```bash

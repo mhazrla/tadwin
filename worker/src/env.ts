@@ -8,5 +8,7 @@ export interface Env {
   WEBHOOK_SECRET: string;
   /** Optional: comma-separated list of allowed chat_ids. */
   ALLOWED_CHAT_IDS?: string;
+  /** Optional: chat_id that receives error alerts. */
+  OWNER_CHAT_ID?: string;
   SESSIONS: DurableObjectNamespace;
 }

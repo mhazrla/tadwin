@@ -197,7 +197,10 @@ export default {
         return new Response("bad json", { status: 400 });
       }
       ctx.waitUntil(
-        handleUpdate(env, update).catch((error) => console.error("update failed", error)),
+        handleUpdate(env, update).catch((error) => {
+          console.error("update failed", error);
+          alertOwner(env, "update failed: " + String(error).slice(0, 200)).catch(() => {});
+        }),
       );
       return new Response("ok");
     }
@@ -497,6 +500,46 @@ async function sendNavButtons(env: Env, chatId: number): Promise<void> {
   if (homeAvail) row.push({ text: "Home", callback_data: "home" });
   if (row.length === 0) return;
   await sendKeyboardMessage(env, chatId, "Navigation", [row]);
+}
+
+﻿async function lastAlert(env: Env, chatId: number): Promise<number> {
+  const stub = env.SESSIONS.get(env.SESSIONS.idFromName(`chat:${chatId}`));
+  const resp = await stub.fetch("https://do/", {
+    method: "POST",
+    body: JSON.stringify({ op: "getLastAlert" }),
+  });
+  if (!resp.ok) return 0;
+  const data = (await resp.json()) as unknown;
+  return typeof data === "number" ? data : 0;
+}
+
+async function setLastAlert(env: Env, chatId: number, value: number): Promise<void> {
+  const stub = env.SESSIONS.get(env.SESSIONS.idFromName(`chat:${chatId}`));
+  await stub.fetch("https://do/", {
+    method: "POST",
+    body: JSON.stringify({ op: "setLastAlert", value }),
+  });
+}
+
+const ALERT_COOLDOWN_MS = 5 * 60 * 1000;
+
+async function alertOwner(env: Env, text: string): Promise<void> {
+  const owner = env.OWNER_CHAT_ID?.trim();
+  if (!owner) return;
+  const ownerId = Number(owner);
+  if (!Number.isFinite(ownerId)) return;
+
+  const last = await lastAlert(env, ownerId);
+  const now = Date.now();
+  if (now - last < ALERT_COOLDOWN_MS) return;
+  await setLastAlert(env, ownerId, now);
+
+  const short = text.slice(0, 300);
+  try {
+    await tgSendMessage(env, ownerId, `Alert: ${short}`);
+  } catch (error) {
+    console.error("alertOwner failed", error);
+  }
 }
 
 /** Read the stored bot message IDs without pretending they are a session object. */
@@ -1347,6 +1390,7 @@ async function handlePreview(env: Env, chatId: number): Promise<void> {
     await sendKeyboardMessage(env, chatId, previewText, buttons);
   } catch (error) {
     console.error("handlePreview failed", error);
+    await alertOwner(env, "handlePreview: " + String(error).slice(0, 200));
     let message = messageOf(error).slice(0, 200);
     await sendMessage(env, chatId, `Failed: ${message}`);
   }
@@ -1447,6 +1491,7 @@ async function handleConfirmDone(env: Env, chatId: number): Promise<void> {
     await sessionCall(env, chatId, { op: "clear" });
   } catch (error) {
     console.error("handleConfirmDone failed", error);
+    await alertOwner(env, "handleConfirmDone: " + String(error).slice(0, 200));
     await setProgress("Failed.");
     let message = messageOf(error).slice(0, 200);
     if (/file size|size limit|too large|exceed/i.test(message)) {

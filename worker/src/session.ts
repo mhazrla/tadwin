@@ -244,6 +244,18 @@ export class SessionDO {
         return Response.json({ count: 0 });
       }
 
+      case "setLastAlert": {
+        const value =
+          typeof body.value === "number" && body.value > 0 ? body.value : Date.now();
+        await this.state.storage.put("lastAlert", value);
+        return Response.json(value);
+      }
+
+      case "getLastAlert": {
+        const value = (await this.state.storage.get<number>("lastAlert")) ?? 0;
+        return Response.json(value);
+      }
+
       case "setLastClearChat": {
         const value =
           typeof body.value === "number" && body.value > 0 ? body.value : Date.now();
