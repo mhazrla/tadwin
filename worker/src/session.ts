@@ -42,6 +42,7 @@ export interface SessionState {
   pendingBlocks: unknown[];
   awaitingEdit: "title" | "material" | null;
   awaitingTitle: boolean;
+  summaryMode: "ai" | "raw";
 }
 
 export function emptyState(): SessionState {
@@ -63,6 +64,7 @@ export function emptyState(): SessionState {
     pendingBlocks: [],
     awaitingEdit: null,
     awaitingTitle: false,
+    summaryMode: "ai",
   };
 }
 
@@ -121,6 +123,7 @@ export class SessionDO {
           pendingBlocks: [],
           awaitingEdit: null,
           awaitingTitle: false,
+          summaryMode: "ai",
         };
         await this.state.storage.put("session", next);
         return Response.json(next);
@@ -189,6 +192,13 @@ export class SessionDO {
       case "setAwaitingTitle": {
         const value = Boolean(body.value);
         const next: SessionState = { ...current, awaitingTitle: value };
+        await this.state.storage.put("session", next);
+        return Response.json(next);
+      }
+
+      case "setSummaryMode": {
+        const value = body.value === "raw" ? "raw" : "ai";
+        const next: SessionState = { ...current, summaryMode: value };
         await this.state.storage.put("session", next);
         return Response.json(next);
       }

@@ -18,7 +18,7 @@ import {
   type PageRef,
   type SectionContent,
 } from "./notion";
-import { entitiesToMarkdown } from "./markdown";
+import { entitiesToMarkdown, markdownToBlocks } from "./markdown";
 import { emptyState, type SectionRef, type SessionState } from "./session";
 import {
   answerCallbackQuery,
@@ -958,6 +958,16 @@ async function handleCallback(env: Env, query: TgCallbackQuery): Promise<void> {
     return;
   }
 
+  if (data === "mode:raw" || data === "mode:ai") {
+    if (query.message?.message_id) {
+      try { await deleteMessage(env, chatId, query.message.message_id); } catch (error) { console.error("delete list failed", messageOf(error)); }
+    }
+    await sessionCall(env, chatId, { op: "setSummaryMode", value: data === "mode:raw" ? "raw" : "ai" });
+    await answerCallbackQuery(env, query.id);
+    await handlePreview(env, chatId);
+    return;
+  }
+
   if (data.startsWith("mode:")) {
     const kind = data.slice(5) === "pages" ? "pages" : "sections";
     await answerCallbackQuery(env, query.id);
@@ -1401,6 +1411,7 @@ async function handlePreview(env: Env, chatId: number): Promise<void> {
 
   const material = session.materials.join("\n\n").trim();
   const title = session.title?.trim() || extractTitle(material);
+  const mode = session.summaryMode === "raw" ? "raw" : "ai";
 
   await sendMessage(env, chatId, "Preparing preview...");
 
@@ -1416,7 +1427,12 @@ async function handlePreview(env: Env, chatId: number): Promise<void> {
       return;
     }
 
-    const blocks = await formatMaterial(env, material, title, references);
+    let blocks: Block[];
+    if (mode === "raw") {
+      blocks = markdownToBlocks(material);
+    } else {
+      blocks = await formatMaterial(env, material, title, references);
+    }
 
     await sessionCall(env, chatId, { op: "setPendingBlocks", items: blocks });
     await sessionCall(env, chatId, { op: "setAwaitingEdit", value: null });
@@ -1433,12 +1449,18 @@ async function handlePreview(env: Env, chatId: number): Promise<void> {
     const audioCount = session.audios.length;
     const imageCount = session.images.length;
 
+    const modeLabel = mode === "raw" ? "Raw (tanpa AI)" : "Ringkas (AI)";
     const previewText =
-      "Preview\n" +
+      "Preview [" + modeLabel + "]\n" +
       `Title: ${title}\n` +
       `Material: ${material.length} chars\n` +
       `Audio: ${audioCount}  Image: ${imageCount}\n` +
       `Blocks: ${blocks.length} (${summary})`;
+
+    const toggleBtn =
+      mode === "raw"
+        ? { text: "Ringkas (AI)", callback_data: "mode:ai" }
+        : { text: "Raw (tanpa AI)", callback_data: "mode:raw" };
 
     const buttons: InlineButton[][] = [
       [
@@ -1446,7 +1468,7 @@ async function handlePreview(env: Env, chatId: number): Promise<void> {
         { text: "Edit title", callback_data: "edit:title" },
         { text: "Edit material", callback_data: "edit:material" },
       ],
-      [{ text: "Cancel", callback_data: "cancel:preview" }],
+      [toggleBtn, { text: "Cancel", callback_data: "cancel:preview" }],
     ];
 
     await sendKeyboardMessage(env, chatId, previewText, buttons);

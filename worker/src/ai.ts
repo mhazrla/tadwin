@@ -17,7 +17,7 @@ Rules:
 Content preservation (CRITICAL - do not violate):
 - Dalil, ayat, hadith, and all Arabic text (including harakat) must appear VERBATIM. Never summarize, paraphrase, translate, or drop them.
 - Keep each dalil as its own block; do not merge multiple dalil into one.
-- Explanatory/secondary text may be tightened slightly for readability, but its meaning must be preserved.
+- Explanatory/secondary text: tighten for readability. Merge repeated points, remove redundancy, keep only key explanations. Do NOT remove any dalil, ayat, hadith, or Arabic text.
 - Never remove content that contains Arabic script or citation markers (QS., HR., ayat numbers).
 - If unsure whether something is a dalil, keep it verbatim rather than shortening it.
 - You may restructure (paragraphs, quotes, lists, headings) and fix Markdown formatting.
@@ -82,7 +82,7 @@ export async function formatMaterial(
     const outputText = parsed.map((i) => (typeof i?.text === "string" ? i.text : "")).join("\n");
 
     const arabicOk = allArabicPreserved(material, outputText);
-    const lengthOk = inputLen === 0 || outputLen >= inputLen * 0.5;
+    const lengthOk = inputLen === 0 || outputLen >= inputLen * 0.3;
 
     if (!arabicOk) {
       console.error("AI dropped Arabic content; falling back to local parser");
