@@ -20,7 +20,9 @@ import { entitiesToMarkdown } from "./markdown";
 import { emptyState, type SectionRef, type SessionState } from "./session";
 import {
   answerCallbackQuery,
+  deleteMessage,
   downloadFile,
+  editMessageText,
   sendAudio,
   sendDocument,
   sendHtml,
@@ -29,6 +31,7 @@ import {
   sendPhoto,
   setMyCommands,
   setWebhook,
+  type InlineButton,
 } from "./telegram";
 
 export { SessionDO } from "./session";
@@ -275,7 +278,7 @@ async function handleCommand(env: Env, chatId: number, text: string): Promise<vo
 }
 
 const BUTTON_LIMIT = 60;
-const BUTTONS_PER_MESSAGE = 10;
+const BUTTONS_PER_PAGE = 8;
 
 function buttonLabel(title: string): string {
   const text = title.replace(/\s+/g, " ").trim() || "Untitled";
@@ -284,16 +287,42 @@ function buttonLabel(title: string): string {
   return `${text.slice(0, 28).trimEnd()}…${text.slice(-28).trimStart()}`;
 }
 
+interface SectionPage {
+  text: string;
+  keyboard: InlineButton[][];
+}
+
+/** One page of the section list: 8 entries plus a Prev / page / Next row. */
+function buildSectionPage(sections: SectionRef[], page: number): SectionPage {
+  const pages = Math.max(1, Math.ceil(sections.length / BUTTONS_PER_PAGE));
+  const safePage = Math.min(Math.max(0, page), pages - 1);
+  const start = safePage * BUTTONS_PER_PAGE;
+  const chunk = sections.slice(start, start + BUTTONS_PER_PAGE);
+
+  const keyboard: InlineButton[][] = chunk.map((section, offset) => [
+    { text: buttonLabel(section.title), callback_data: `ret:${start + offset}` },
+  ]);
+
+  const nav: InlineButton[] = [];
+  if (safePage > 0) nav.push({ text: "◀ Prev", callback_data: `pg:${safePage - 1}` });
+  nav.push({ text: `${safePage + 1}/${pages}`, callback_data: "cur" });
+  if (safePage < pages - 1) nav.push({ text: "Next ▶", callback_data: `pg:${safePage + 1}` });
+  keyboard.push(nav);
+
+  return {
+    text: `Sections (${sections.length}) — page ${safePage + 1}/${pages}\nTap one to read it:`,
+    keyboard,
+  };
+}
+
 /** List the page's toggle entries as inline buttons and cache them in the session. */
 async function handleSections(env: Env, chatId: number, arg: string): Promise<void> {
   let pageId: string | null = null;
-  let pageUrl: string | null = null;
 
   if (arg) {
     const match = arg.match(URL_RE);
     try {
       pageId = parsePageId(match ? match[0] : arg);
-      pageUrl = match ? match[0] : null;
     } catch {
       await sendMessage(env, chatId, "That Notion link is not valid.");
       return;
@@ -301,7 +330,6 @@ async function handleSections(env: Env, chatId: number, arg: string): Promise<vo
   } else {
     const session = await sessionCall(env, chatId, { op: "get" });
     pageId = session.pageId;
-    pageUrl = session.pageUrl;
   }
 
   if (!pageId) {
@@ -324,17 +352,8 @@ async function handleSections(env: Env, chatId: number, arg: string): Promise<vo
 
   await sessionCall(env, chatId, { op: "setSections", pageId, items: sections });
 
-  for (let start = 0; start < sections.length; start += BUTTONS_PER_MESSAGE) {
-    const chunk = sections.slice(start, start + BUTTONS_PER_MESSAGE);
-    const buttons = chunk.map((section, offset) => [
-      { text: buttonLabel(section.title), callback_data: `ret:${start + offset}` },
-    ]);
-    const header =
-      start === 0
-        ? `Sections (${sections.length})${pageUrl ? `\n${pageUrl}` : ""}\nTap one to read it:`
-        : `Sections ${start + 1}–${start + chunk.length}:`;
-    await sendKeyboardMessage(env, chatId, header, buttons);
-  }
+  const first = buildSectionPage(sections, 0);
+  await sendKeyboardMessage(env, chatId, first.text, first.keyboard);
 }
 
 async function handleCallback(env: Env, query: TgCallbackQuery): Promise<void> {
@@ -347,6 +366,19 @@ async function handleCallback(env: Env, query: TgCallbackQuery): Promise<void> {
   }
 
   const data = query.data ?? "";
+
+  if (data === "cur") {
+    await answerCallbackQuery(env, query.id);
+    return;
+  }
+
+  if (data.startsWith("pg:")) {
+    const page = Number(data.slice(3));
+    await answerCallbackQuery(env, query.id);
+    await showSectionPage(env, chatId, query.message?.message_id, page);
+    return;
+  }
+
   const index = Number(data.startsWith("ret:") ? data.slice(4) : NaN);
   if (!Number.isInteger(index) || index < 0) {
     await answerCallbackQuery(env, query.id, "Unknown entry.");
@@ -354,16 +386,56 @@ async function handleCallback(env: Env, query: TgCallbackQuery): Promise<void> {
   }
 
   await answerCallbackQuery(env, query.id, "Loading…");
-  await retrieveSection(env, chatId, index);
+  await retrieveSection(env, chatId, index, query.message?.message_id);
+}
+
+/** Re-render the section list in place; fall back to a new message if it is gone. */
+async function showSectionPage(
+  env: Env,
+  chatId: number,
+  messageId: number | undefined,
+  page: number,
+): Promise<void> {
+  const session = await sessionCall(env, chatId, { op: "get" });
+  if (session.sections.length === 0) {
+    await sendMessage(env, chatId, "That list has expired. Send /sections again.");
+    return;
+  }
+
+  const built = buildSectionPage(session.sections, page);
+  if (!messageId) {
+    await sendKeyboardMessage(env, chatId, built.text, built.keyboard);
+    return;
+  }
+  try {
+    await editMessageText(env, chatId, messageId, built.text, built.keyboard);
+  } catch (error) {
+    console.error("edit page failed", messageOf(error));
+    await sendKeyboardMessage(env, chatId, built.text, built.keyboard);
+  }
 }
 
 /** Send one section back to Telegram: audio, image, then the formatted text. */
-async function retrieveSection(env: Env, chatId: number, index: number): Promise<void> {
+async function retrieveSection(
+  env: Env,
+  chatId: number,
+  index: number,
+  listMessageId?: number,
+): Promise<void> {
   const session = await sessionCall(env, chatId, { op: "get" });
   const section = session.sections[index];
   if (!section) {
     await sendMessage(env, chatId, "That list has expired. Send /sections again.");
     return;
+  }
+
+  // The pick is done: drop the list bubble so the chat stays clean.
+  if (listMessageId) {
+    try {
+      await deleteMessage(env, chatId, listMessageId);
+    } catch (error) {
+      console.error("delete list failed", messageOf(error));
+    }
   }
 
   await sendMessage(env, chatId, `Reading: ${section.title}`);

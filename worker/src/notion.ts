@@ -128,54 +128,105 @@ export async function getSectionContent(
   sectionId: string,
 ): Promise<SectionContent> {
   const children = await getChildren(env, sectionId);
-  const html: string[] = [];
-  const audios: SectionContent["audios"] = [];
-  const images: SectionContent["images"] = [];
+  const media: MediaSink = { audios: [], images: [] };
+  const html = await renderBlocks(env, children, 0, media);
+  return { html, audios: media.audios, images: media.images };
+}
+
+interface MediaSink {
+  audios: SectionContent["audios"];
+  images: SectionContent["images"];
+}
+
+/** Notion nests translations and sub-points inside quote blocks; do not lose them. */
+const MAX_DEPTH = 5;
+
+async function renderBlocks(
+  env: Env,
+  blocks: Json[],
+  depth: number,
+  media: MediaSink,
+  inQuote = false,
+): Promise<string[]> {
+  const lines: string[] = [];
   let number = 0;
 
-  for (const block of children) {
+  for (const block of blocks) {
     const type = block.type as string | undefined;
     if (!type) continue;
-    const obj = (block[type] as Json | undefined) ?? {};
-
-    if (type === "audio") {
-      audios.push({ url: fileUrl(obj), caption: richTextToHtml(obj.caption) });
-      continue;
-    }
-    if (type === "image") {
-      images.push({ url: fileUrl(obj), caption: richTextToHtml(obj.caption) });
-      continue;
-    }
-    if (type === "divider") {
-      html.push("———");
-      number = 0;
-      continue;
-    }
-
-    const inner = richTextToHtml(obj.rich_text);
-    if (!inner.trim()) continue;
 
     if (type === "numbered_list_item") {
       number += 1;
-      html.push(`${number}. ${inner}`);
-      continue;
-    }
-    number = 0;
-
-    if (type === "heading_1" || type === "heading_2" || type === "heading_3") {
-      html.push(`<b>${inner}</b>`);
-    } else if (type === "quote") {
-      html.push(`<blockquote>${inner}</blockquote>`);
-    } else if (type === "bulleted_list_item") {
-      html.push(`• ${inner}`);
-    } else if (type === "code") {
-      html.push(`<pre>${inner}</pre>`);
     } else {
-      html.push(inner);
+      number = 0;
+    }
+
+    lines.push(...(await blockLines(env, block, depth, media, number, inQuote)));
+  }
+  return lines;
+}
+
+async function blockLines(
+  env: Env,
+  block: Json,
+  depth: number,
+  media: MediaSink,
+  number: number,
+  inQuote: boolean,
+): Promise<string[]> {
+  const type = block.type as string | undefined;
+  if (!type) return [];
+  const obj = (block[type] as Json | undefined) ?? {};
+
+  if (type === "audio") {
+    media.audios.push({ url: fileUrl(obj), caption: richTextToHtml(obj.caption) });
+    return [];
+  }
+  if (type === "image") {
+    media.images.push({ url: fileUrl(obj), caption: richTextToHtml(obj.caption) });
+    return [];
+  }
+
+  const children =
+    block.has_children && depth < MAX_DEPTH
+      ? await getChildren(env, block.id as string)
+      : [];
+
+  if (type === "divider") return ["———"];
+
+  if (type === "quote") {
+    const lines: string[] = [];
+    const own = richTextToHtml(obj.rich_text).trim();
+    if (own) lines.push(own);
+    lines.push(...(await renderBlocks(env, children, depth + 1, media, true)));
+    if (!lines.length) return [];
+    // Nested quotes stay inside the outer one: Telegram cannot nest blockquotes.
+    return inQuote ? lines : [`<blockquote>${lines.join("\n")}</blockquote>`];
+  }
+
+  const inner = richTextToHtml(obj.rich_text);
+  const lines: string[] = [];
+
+  if (inner.trim()) {
+    if (type === "heading_1" || type === "heading_2" || type === "heading_3") {
+      lines.push(`<b>${inner}</b>`);
+    } else if (type === "bulleted_list_item") {
+      lines.push(`• ${inner}`);
+    } else if (type === "numbered_list_item") {
+      lines.push(`${number}. ${inner}`);
+    } else if (type === "code") {
+      lines.push(`<pre>${inner}</pre>`);
+    } else {
+      lines.push(inner);
     }
   }
 
-  return { html, audios, images };
+  if (children.length) {
+    const sub = await renderBlocks(env, children, depth + 1, media, inQuote);
+    for (const line of sub) lines.push(inQuote ? line : `  ${line}`);
+  }
+
+  return lines;
 }
 
 /** Upload a file through the File Upload API; returns the file_upload id. */

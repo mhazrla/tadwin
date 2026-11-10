@@ -116,6 +116,33 @@ export async function sendKeyboardMessage(
   });
 }
 
+/** Replace a message's text and keyboard in place (used for pagination). */
+export async function editMessageText(
+  env: Env,
+  chatId: number,
+  messageId: number,
+  text: string,
+  buttons?: InlineButton[][],
+): Promise<void> {
+  const payload: Record<string, unknown> = {
+    chat_id: chatId,
+    message_id: messageId,
+    text,
+    disable_web_page_preview: true,
+  };
+  if (buttons) payload.reply_markup = { inline_keyboard: buttons };
+  await tg(env, "editMessageText", payload);
+}
+
+/** Remove a message entirely (used to clean up the section list after a pick). */
+export async function deleteMessage(
+  env: Env,
+  chatId: number,
+  messageId: number,
+): Promise<void> {
+  await tg(env, "deleteMessage", { chat_id: chatId, message_id: messageId });
+}
+
 export async function answerCallbackQuery(
   env: Env,
   callbackQueryId: string,

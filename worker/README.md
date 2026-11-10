@@ -32,9 +32,13 @@ toggle per entry, order **audio → image → text**, `>` lines become `quote`, 
 ## Reading entries back
 
 `/sections` lists the toggle headings of the session page (or `/sections <link>` for any page) as an
-inline keyboard. Tapping a button fetches that toggle's children and sends them to Telegram: audio as
-a playable file, image as a photo with its caption, then the text as Telegram HTML (bold, italic,
-code, strike, links, quotes, lists, headings preserved).
+inline keyboard, 8 per page. `◀ Prev` / `Next ▶` edit that same message, so the chat does not fill up
+with list bubbles. Tapping an entry deletes the list message, then fetches that toggle's children and
+sends them to Telegram: audio as a playable file, image as a photo with its caption, then the text as
+Telegram HTML (bold, italic, code, strike, links, quotes, lists, headings preserved).
+
+Quote blocks are rendered as a single `<blockquote>` including their nested children — Notion stores
+the translation inside the quote block, not next to it.
 
 The webhook must receive `callback_query` updates for the buttons to work — `/setup` sets
 `allowed_updates: ["message", "callback_query"]`. Re-run `/setup` after upgrading from an older

@@ -84,9 +84,10 @@ The bot registers these in Telegram's command menu, so typing `/` shows the list
 ## Reading existing entries
 
 Send `/sections` (uses the page already in the session) or `/sections <link>` to point at any page.
-Tadwin lists every toggle heading on that page as an inline button — the label keeps the start and
-end of the title, so long `Halaqah …` titles stay distinguishable. Tap one and the bot sends that
-entry back:
+Tadwin shows the page's toggle headings as an inline keyboard, 8 per page, with `◀ Prev` / `Next ▶`
+to move between pages — the list message is edited in place, so the chat does not fill up. Labels keep
+the start and end of the title, so long `Halaqah …` titles stay distinguishable. Tap one and the bot
+deletes the list, then sends that entry back:
 
 - **Audio** — sent as a playable file (Telegram fetches the Notion URL directly).
 - **Image** — sent as a photo, with its Notion caption.
