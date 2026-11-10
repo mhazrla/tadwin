@@ -38,6 +38,16 @@ import {
 
 export { SessionDO } from "./session";
 
+/** True if this chat is the owner (or if no owner is configured, everyone is owner). */
+function isAdmin(env: Env, chatId: number): boolean {
+  const owner = env.OWNER_CHAT_ID?.trim();
+  if (!owner) return true;
+  return String(chatId) === owner;
+}
+
+const READ_ONLY_MSG =
+  "Read-only mode: you can browse and read, but not add or edit entries. " +
+  "Ask the bot owner for write access.";
 const URL_RE = /https?:\/\/(?:www\.)?(?:app\.)?notion\.(?:so|com)\/\S+/i;
 const DEFAULT_HOME_PAGE_ID = "2823c08b-b705-8081-968a-daeb8dcc4b33";
 const DEFAULT_HOME_PAGE_URL = "https://www.notion.so/2823c08bb7058081968adaeb8dcc4b33";
@@ -52,6 +62,7 @@ const HELP =
   "To read what is already on a page, send /browse (or /browse <link>), then tap an entry.\n" +
   "To search, send /search <keyword> (title + content). Spaces are fine; no quotes needed.\n" +
   "  Optional link: /search <link> <keyword>.\n\n" +
+  "Read-only users can browse and read; only the owner can add entries.\n\n" +
   "Commands:\n" +
   "/browse  browse pages and entries, then read one\n" +
   "/search  search sections and pages by keyword\n" +
@@ -331,6 +342,10 @@ async function handleCommand(env: Env, chatId: number, text: string): Promise<vo
 
     case "/title":
     case "/judul": {
+      if (!isAdmin(env, chatId)) {
+        await sendMessage(env, chatId, READ_ONLY_MSG);
+        return;
+      }
       const value = text.replace(/^\/(?:title|judul)(@\w+)?\s*/i, "").trim();
       if (!value) {
         const session = await sessionCall(env, chatId, { op: "get" });
@@ -361,6 +376,10 @@ async function handleCommand(env: Env, chatId: number, text: string): Promise<vo
 
     case "/done":
     case "/selesai": {
+      if (!isAdmin(env, chatId)) {
+        await sendMessage(env, chatId, READ_ONLY_MSG);
+        return;
+      }
       await handlePreview(env, chatId);
       return;
     }
@@ -1134,6 +1153,12 @@ async function handleText(env: Env, chatId: number, msg: TgMessage): Promise<voi
   const text = entitiesToMarkdown(raw, msg.entities);
 
   const session = await sessionCall(env, chatId, { op: "get" });
+
+  if (!isAdmin(env, chatId) && !raw.match(URL_RE)) {
+    await sendMessage(env, chatId, READ_ONLY_MSG);
+    return;
+  }
+
   if (session.awaitingEdit === "title") {
     await sessionCall(env, chatId, { op: "setTitle", title: text });
     await sessionCall(env, chatId, { op: "setAwaitingEdit", value: null });
@@ -1177,6 +1202,10 @@ async function handleText(env: Env, chatId: number, msg: TgMessage): Promise<voi
 }
 
 async function handleDocument(env: Env, chatId: number, msg: TgMessage): Promise<void> {
+  if (!isAdmin(env, chatId)) {
+    await sendMessage(env, chatId, READ_ONLY_MSG);
+    return;
+  }
   const doc = msg.document!;
   const name = doc.file_name ?? "file";
   const mime = doc.mime_type ?? "";
@@ -1265,6 +1294,10 @@ async function handleDocument(env: Env, chatId: number, msg: TgMessage): Promise
 }
 
 async function handlePhoto(env: Env, chatId: number, msg: TgMessage): Promise<void> {
+  if (!isAdmin(env, chatId)) {
+    await sendMessage(env, chatId, READ_ONLY_MSG);
+    return;
+  }
   const photo = msg.photo![msg.photo!.length - 1];
   await sessionCall(env, chatId, {
     op: "push",
@@ -1285,6 +1318,10 @@ async function handleAudio(
   media: TgMedia,
   isVoice: boolean,
 ): Promise<void> {
+  if (!isAdmin(env, chatId)) {
+    await sendMessage(env, chatId, READ_ONLY_MSG);
+    return;
+  }
   const rawMime = media.mime_type ?? "";
   const name = media.file_name ?? (isVoice ? "audio.ogg" : "audio.mp3");
   const upload = audioUpload(name, rawMime);
@@ -1306,6 +1343,10 @@ async function handleAudio(
 }
 
 async function handleVideo(env: Env, chatId: number, media: TgMedia): Promise<void> {
+  if (!isAdmin(env, chatId)) {
+    await sendMessage(env, chatId, READ_ONLY_MSG);
+    return;
+  }
   const rawMime = media.mime_type ?? "video/mp4";
   const name = media.file_name ?? "audio.mp4";
   const upload = audioUpload(name, rawMime);
