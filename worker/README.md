@@ -76,7 +76,7 @@ stored. If a URL has expired, the bot sends the link as text instead.
 ## Monitoring
 
 - **Logs**: `npx wrangler tail` (real-time) or Cloudflare Dashboard → Workers → `tadwin-bot` → Logs.
-- **Auto-alerts**: set `OWNER_CHAT_ID` (your Telegram chat_id) as a secret. The bot sends a short alert to that chat when an unexpected error, Notion failure, or AI failure occurs (deduped to 1 per 5 minutes). Get your chat_id via `@userinfobot`.
+- **Read-only guests**: if `OWNER_CHAT_ID` is set, only that user can add/edit entries. Others can browse and read (audio/image/text) but cannot submit material or run `/done`/`/title`.
 
 ## Setup
 

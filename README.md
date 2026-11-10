@@ -129,9 +129,13 @@ was deployed cannot be removed by the bot.
 
 ---
 
-## Formatting
+## Read-only mode for guests
 
-Formatting does not depend on how Telegram renders text.
+If `OWNER_CHAT_ID` is set, only that user can add or edit entries. Everyone else can browse and read
+(audio, images, text) but cannot submit material or run `/done`/`/title` — the bot replies with a
+read-only notice. Omit `OWNER_CHAT_ID` to keep the bot open to everyone (current default).
+
+## Formatting
 
 - **Formatted Telegram messages** — bold/italic/code/link/quote arrive as Telegram `entities`; the bot
   converts them to Markdown.
