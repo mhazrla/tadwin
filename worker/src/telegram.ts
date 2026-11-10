@@ -244,12 +244,6 @@ export async function sendHtml(
   let buffer = "";
 
   for (const block of blocks) {
-    if (!block.trim()) {
-      // Preserve blank-line separators between blocks.
-      if (buffer && !buffer.endsWith("\n")) buffer += "\n";
-      if (buffer && !buffer.endsWith("\n\n")) buffer += "\n";
-      continue;
-    }
     if (block.length > HTML_LIMIT) {
       if (buffer) {
         messages.push(buffer);
