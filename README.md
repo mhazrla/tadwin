@@ -76,7 +76,7 @@ The bot registers these in Telegram's command menu, so typing `/` shows the list
 | `/start` | — | Welcome message and instructions |
 | `/browse [link]` | `/jelajah`, `/sections`, `/daftar`, `/pages`, `/halaman` | Browse a page: entries, child pages, or its own content |
 | `/search <keyword>` | `/cari` | Search sections and pages (title + content) |
-| `/title <text>` | `/judul` | Set the entry title (supports `**bold**` / `*italic*`) |
+| `/add [text]` | `/tambah`, `/title`, `/judul` | Start a new entry (guided title); inline text sets title directly |
 | `/status` | — | Show the current session: page, title, material size, audio, image |
 | `/done` | `/selesai` | Build the entry in Notion |
 | `/cancel` | `/batal` | Clear the current session |

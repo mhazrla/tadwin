@@ -41,6 +41,7 @@ export interface SessionState {
   listPage: number;
   pendingBlocks: unknown[];
   awaitingEdit: "title" | "material" | null;
+  awaitingTitle: boolean;
 }
 
 export function emptyState(): SessionState {
@@ -61,6 +62,7 @@ export function emptyState(): SessionState {
     listPage: 0,
     pendingBlocks: [],
     awaitingEdit: null,
+    awaitingTitle: false,
   };
 }
 
@@ -118,6 +120,7 @@ export class SessionDO {
           listPage: 0,
           pendingBlocks: [],
           awaitingEdit: null,
+          awaitingTitle: false,
         };
         await this.state.storage.put("session", next);
         return Response.json(next);
@@ -179,6 +182,13 @@ export class SessionDO {
       case "setAwaitingEdit": {
         const value = body.value === "title" || body.value === "material" ? body.value : null;
         const next: SessionState = { ...current, awaitingEdit: value };
+        await this.state.storage.put("session", next);
+        return Response.json(next);
+      }
+
+      case "setAwaitingTitle": {
+        const value = Boolean(body.value);
+        const next: SessionState = { ...current, awaitingTitle: value };
         await this.state.storage.put("session", next);
         return Response.json(next);
       }

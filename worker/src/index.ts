@@ -55,9 +55,10 @@ const DEFAULT_HOME_PAGE_URL = "https://www.notion.so/2823c08bb7058081968adaeb8dc
 const HELP =
   "How to use:\n" +
   "1. Send a Notion page link.\n" +
-  "2. (Optional) /title <text> to set the entry title.\n" +
+  "2. /add to set the title (guided), or /add <text> directly.\n" +
   "3. Send the material: plain text, or a .txt file for long notes.\n" +
   "4. Send audio, then an image (the caption becomes the description).\n" +
+  "   Material, audio, and image can be sent in any order after the title.\n" +
   "5. /done to preview, then confirm to build the entry.\n\n" +
   "To read what is already on a page, send /browse (or /browse <link>), then tap an entry.\n" +
   "To search, send /search <keyword> (title + content). Spaces are fine; no quotes needed.\n" +
@@ -66,7 +67,9 @@ const HELP =
   "Commands:\n" +
   "/browse  browse pages and entries, then read one\n" +
   "/search  search sections and pages by keyword\n" +
-  "/title  set the entry title\n" +
+  "/add  start a new entry (guided title)\n" +
+  "/skip  skip the title (auto-generate)\n" +
+  "/title  alias of /add\n" +
   "/status  show the current session\n" +
   "/cancel  clear the session\n" +
   "/clearchat  delete the bot's messages in this chat\n" +
@@ -79,7 +82,7 @@ const COMMANDS = [
   { command: "home", description: "Open the default Notes page" },
   { command: "browse", description: "Browse pages and entries" },
   { command: "search", description: "Search sections and pages" },
-  { command: "title", description: "Set the entry title" },
+  { command: "add", description: "Start a new entry (guided)" },
   { command: "status", description: "Show the current session" },
   { command: "done", description: "Preview and build the entry" },
   { command: "cancel", description: "Clear the current session" },
@@ -340,26 +343,40 @@ async function handleCommand(env: Env, chatId: number, text: string): Promise<vo
       return;
     }
 
+    case "/add":
+    case "/tambah":
     case "/title":
     case "/judul": {
       if (!isAdmin(env, chatId)) {
         await sendMessage(env, chatId, READ_ONLY_MSG);
         return;
       }
-      const value = text.replace(/^\/(?:title|judul)(@\w+)?\s*/i, "").trim();
-      if (!value) {
-        const session = await sessionCall(env, chatId, { op: "get" });
-        await sendMessage(
-          env,
-          chatId,
-          session.title
-            ? `Current title: ${session.title}\nChange it with /title <new text>`
-            : "No manual title yet. Send /title <text>, or let it default to the first line of the material.",
-        );
+      const value = text.replace(/^\/(?:add|tambah|title|judul)(@\w+)?\s*/i, "").trim();
+      if (value) {
+        await sessionCall(env, chatId, { op: "setTitle", title: value });
+        await sessionCall(env, chatId, { op: "setAwaitingTitle", value: false });
+        await sendMessage(env, chatId, "Title set. Now send material, audio, and image (any order), then /done.");
         return;
       }
-      await sessionCall(env, chatId, { op: "setTitle", title: value });
-      await sendMessage(env, chatId, `Entry title set: ${value} \u{1F3F7}`);
+      await sessionCall(env, chatId, { op: "setAwaitingTitle", value: true });
+      const session = await sessionCall(env, chatId, { op: "get" });
+      if (session.title) {
+        await sendMessage(env, chatId, "Current title: " + session.title + ". Send a new title, or /skip to keep it.");
+      } else {
+        await sendMessage(env, chatId, "Step 1: Send the entry title. (Or /skip to auto-generate from material.)");
+      }
+      return;
+    }
+
+    case "/skip": {
+      const session = await sessionCall(env, chatId, { op: "get" });
+      if (session.awaitingTitle) {
+        await sessionCall(env, chatId, { op: "setAwaitingTitle", value: false });
+        await sessionCall(env, chatId, { op: "setTitle", title: "" });
+        await sendMessage(env, chatId, "Title will be auto-generated. Now send material, audio, and image (any order), then /done.");
+        return;
+      }
+      await sendMessage(env, chatId, "Nothing to skip.");
       return;
     }
 
@@ -1153,6 +1170,13 @@ async function handleText(env: Env, chatId: number, msg: TgMessage): Promise<voi
   const text = entitiesToMarkdown(raw, msg.entities);
 
   const session = await sessionCall(env, chatId, { op: "get" });
+
+  if (session.awaitingTitle) {
+    await sessionCall(env, chatId, { op: "setTitle", title: text });
+    await sessionCall(env, chatId, { op: "setAwaitingTitle", value: false });
+    await sendMessage(env, chatId, "Title set. Now send material, audio, and image (any order), then /done.");
+    return;
+  }
 
   if (!isAdmin(env, chatId) && !raw.match(URL_RE)) {
     await sendMessage(env, chatId, READ_ONLY_MSG);
