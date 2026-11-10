@@ -1,6 +1,6 @@
 import type { Env } from "./env";
 import type { Block } from "./format";
-import { inlineRichText } from "./markdown";
+import { inlineRichText, richTextToHtml } from "./markdown";
 
 const API = "https://api.notion.com/v1";
 const MAX_CHILDREN = 100;
@@ -80,6 +80,102 @@ export async function findToggleExamples(
     examples.push(lines.join("\n"));
   }
   return examples;
+}
+
+export interface SectionRef {
+  id: string;
+  title: string;
+}
+
+/** Toggle headings on a page, in document order — the readable "sections". */
+export async function listSections(
+  env: Env,
+  pageId: string,
+  max = 200,
+): Promise<SectionRef[]> {
+  const out: SectionRef[] = [];
+  for (const block of await getChildren(env, pageId)) {
+    if (out.length >= max) break;
+    const type = block.type as string | undefined;
+    if (!type || !["heading_1", "heading_2", "heading_3"].includes(type)) continue;
+    const obj = block[type] as Json | undefined;
+    if (!obj?.is_toggleable) continue;
+    out.push({
+      id: block.id as string,
+      title: plain(block).trim() || "Untitled",
+    });
+  }
+  return out;
+}
+
+export interface SectionContent {
+  html: string[];
+  audios: Array<{ url: string | null; caption: string }>;
+  images: Array<{ url: string | null; caption: string }>;
+}
+
+function fileUrl(obj: Json | undefined): string | null {
+  const file = obj?.file as Json | undefined;
+  if (typeof file?.url === "string") return file.url;
+  const external = obj?.external as Json | undefined;
+  if (typeof external?.url === "string") return external.url;
+  return null;
+}
+
+/** Children of one toggle, split into media and ready-to-send HTML blocks. */
+export async function getSectionContent(
+  env: Env,
+  sectionId: string,
+): Promise<SectionContent> {
+  const children = await getChildren(env, sectionId);
+  const html: string[] = [];
+  const audios: SectionContent["audios"] = [];
+  const images: SectionContent["images"] = [];
+  let number = 0;
+
+  for (const block of children) {
+    const type = block.type as string | undefined;
+    if (!type) continue;
+    const obj = (block[type] as Json | undefined) ?? {};
+
+    if (type === "audio") {
+      audios.push({ url: fileUrl(obj), caption: richTextToHtml(obj.caption) });
+      continue;
+    }
+    if (type === "image") {
+      images.push({ url: fileUrl(obj), caption: richTextToHtml(obj.caption) });
+      continue;
+    }
+    if (type === "divider") {
+      html.push("———");
+      number = 0;
+      continue;
+    }
+
+    const inner = richTextToHtml(obj.rich_text);
+    if (!inner.trim()) continue;
+
+    if (type === "numbered_list_item") {
+      number += 1;
+      html.push(`${number}. ${inner}`);
+      continue;
+    }
+    number = 0;
+
+    if (type === "heading_1" || type === "heading_2" || type === "heading_3") {
+      html.push(`<b>${inner}</b>`);
+    } else if (type === "quote") {
+      html.push(`<blockquote>${inner}</blockquote>`);
+    } else if (type === "bulleted_list_item") {
+      html.push(`• ${inner}`);
+    } else if (type === "code") {
+      html.push(`<pre>${inner}</pre>`);
+    } else {
+      html.push(inner);
+    }
+  }
+
+  return { html, audios, images };
 }
 
 /** Upload a file through the File Upload API; returns the file_upload id. */

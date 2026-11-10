@@ -12,6 +12,12 @@ export interface ImageRef {
   caption: string;
 }
 
+/** One toggle heading on a page, kept so a button tap can resolve back to it. */
+export interface SectionRef {
+  id: string;
+  title: string;
+}
+
 export interface SessionState {
   pageId: string | null;
   pageUrl: string | null;
@@ -19,10 +25,21 @@ export interface SessionState {
   materials: string[];
   audios: AudioRef[];
   images: ImageRef[];
+  sections: SectionRef[];
+  sectionsPageId: string | null;
 }
 
 export function emptyState(): SessionState {
-  return { pageId: null, pageUrl: null, title: null, materials: [], audios: [], images: [] };
+  return {
+    pageId: null,
+    pageUrl: null,
+    title: null,
+    materials: [],
+    audios: [],
+    images: [],
+    sections: [],
+    sectionsPageId: null,
+  };
 }
 
 type PushField = "materials" | "audios" | "images";
@@ -63,7 +80,27 @@ export class SessionDO {
           ...current,
           pageId: (body.pageId as string) ?? null,
           pageUrl: (body.pageUrl as string) ?? null,
+          // A different page means the cached section list no longer applies.
+          sections: [],
+          sectionsPageId: null,
         };
+        await this.state.storage.put("session", next);
+        return Response.json(next);
+      }
+
+      case "setSections": {
+        const items = Array.isArray(body.items) ? (body.items as SectionRef[]) : [];
+        const next: SessionState = {
+          ...current,
+          sections: items,
+          sectionsPageId: (body.pageId as string) ?? null,
+        };
+        await this.state.storage.put("session", next);
+        return Response.json(next);
+      }
+
+      case "clearSections": {
+        const next: SessionState = { ...current, sections: [], sectionsPageId: null };
         await this.state.storage.put("session", next);
         return Response.json(next);
       }

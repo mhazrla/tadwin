@@ -8,10 +8,27 @@ import {
   parsePageId,
   TEXT_EXT,
 } from "./format";
-import { appendEntry, findToggleExamples, uploadFile } from "./notion";
+import {
+  appendEntry,
+  findToggleExamples,
+  getSectionContent,
+  listSections,
+  uploadFile,
+  type SectionContent,
+} from "./notion";
 import { entitiesToMarkdown } from "./markdown";
-import { emptyState, type SessionState } from "./session";
-import { downloadFile, sendMessage, setMyCommands, setWebhook } from "./telegram";
+import { emptyState, type SectionRef, type SessionState } from "./session";
+import {
+  answerCallbackQuery,
+  downloadFile,
+  sendAudio,
+  sendHtml,
+  sendKeyboardMessage,
+  sendMessage,
+  sendPhoto,
+  setMyCommands,
+  setWebhook,
+} from "./telegram";
 
 export { SessionDO } from "./session";
 
@@ -24,7 +41,9 @@ const HELP =
   "3. Send the material: plain text, or a .txt file for long notes.\n" +
   "4. Send audio, then an image (the caption becomes the description).\n" +
   "5. /done to build the entry.\n\n" +
+  "To read what is already on a page, send /sections (or /sections <link>), then tap an entry.\n\n" +
   "Commands:\n" +
+  "/sections  browse existing entries and read one\n" +
   "/title  set the entry title\n" +
   "/status  show the current session\n" +
   "/cancel  clear the session\n" +
@@ -34,6 +53,7 @@ const HELP =
 /** Shown in Telegram's command menu (also registered via setMyCommands). */
 const COMMANDS = [
   { command: "start", description: "How to use the bot" },
+  { command: "sections", description: "Browse and read existing entries" },
   { command: "title", description: "Set the entry title" },
   { command: "status", description: "Show the current session" },
   { command: "done", description: "Build the entry in Notion" },
@@ -73,9 +93,16 @@ interface TgMessage {
   video_note?: TgMedia;
 }
 
+interface TgCallbackQuery {
+  id: string;
+  data?: string;
+  message?: { chat: { id: number }; message_id: number };
+}
+
 interface TgUpdate {
   update_id: number;
   message?: TgMessage;
+  callback_query?: TgCallbackQuery;
 }
 
 export default {
@@ -132,19 +159,16 @@ export default {
 };
 
 async function handleUpdate(env: Env, update: TgUpdate): Promise<void> {
+  if (update.callback_query) {
+    await handleCallback(env, update.callback_query);
+    return;
+  }
+
   const msg = update.message;
   if (!msg?.chat?.id) return;
   const chatId = msg.chat.id;
 
-  if (env.ALLOWED_CHAT_IDS) {
-    const allowed = env.ALLOWED_CHAT_IDS.split(",")
-      .map((value) => value.trim())
-      .filter(Boolean);
-    if (allowed.length && !allowed.includes(String(chatId))) {
-      await sendMessage(env, chatId, "Sorry, this bot is private.");
-      return;
-    }
-  }
+  if (!(await chatAllowed(env, chatId))) return;
 
   const text = typeof msg.text === "string" ? msg.text.trim() : "";
   if (text.startsWith("/")) {
@@ -168,6 +192,17 @@ async function handleUpdate(env: Env, update: TgUpdate): Promise<void> {
     return;
   }
   if (text) await handleText(env, chatId, msg);
+}
+
+async function chatAllowed(env: Env, chatId: number): Promise<boolean> {
+  if (!env.ALLOWED_CHAT_IDS) return true;
+  const allowed = env.ALLOWED_CHAT_IDS.split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (!allowed.length) return true;
+  if (allowed.includes(String(chatId))) return true;
+  await sendMessage(env, chatId, "Sorry, this bot is private.");
+  return false;
 }
 
 async function handleCommand(env: Env, chatId: number, text: string): Promise<void> {
@@ -195,6 +230,13 @@ async function handleCommand(env: Env, chatId: number, text: string): Promise<vo
     }
 
     // Indonesian aliases are kept so older habits keep working.
+    case "/sections":
+    case "/daftar": {
+      const value = text.replace(/^\/(?:sections|daftar)(@\w+)?\s*/i, "").trim();
+      await handleSections(env, chatId, value);
+      return;
+    }
+
     case "/title":
     case "/judul": {
       const value = text.replace(/^\/(?:title|judul)(@\w+)?\s*/i, "").trim();
@@ -228,6 +270,138 @@ async function handleCommand(env: Env, chatId: number, text: string): Promise<vo
 
     default:
       await sendMessage(env, chatId, HELP);
+  }
+}
+
+const BUTTON_LIMIT = 60;
+const BUTTONS_PER_MESSAGE = 10;
+
+function buttonLabel(title: string): string {
+  const text = title.replace(/\s+/g, " ").trim() || "Untitled";
+  if (text.length <= BUTTON_LIMIT) return text;
+  // Long titles share a prefix ("Halaqah 367 - Bab 33 ..."), so keep both ends.
+  return `${text.slice(0, 28).trimEnd()}…${text.slice(-28).trimStart()}`;
+}
+
+/** List the page's toggle entries as inline buttons and cache them in the session. */
+async function handleSections(env: Env, chatId: number, arg: string): Promise<void> {
+  let pageId: string | null = null;
+  let pageUrl: string | null = null;
+
+  if (arg) {
+    const match = arg.match(URL_RE);
+    try {
+      pageId = parsePageId(match ? match[0] : arg);
+      pageUrl = match ? match[0] : null;
+    } catch {
+      await sendMessage(env, chatId, "That Notion link is not valid.");
+      return;
+    }
+  } else {
+    const session = await sessionCall(env, chatId, { op: "get" });
+    pageId = session.pageId;
+    pageUrl = session.pageUrl;
+  }
+
+  if (!pageId) {
+    await sendMessage(env, chatId, "No Notion page yet. Send a page link, or /sections <link>.");
+    return;
+  }
+
+  let sections: SectionRef[];
+  try {
+    sections = await listSections(env, pageId);
+  } catch (error) {
+    await sendMessage(env, chatId, `Could not read the page: ${messageOf(error)}`);
+    return;
+  }
+
+  if (sections.length === 0) {
+    await sendMessage(env, chatId, "No sections (toggle headings) found on that page.");
+    return;
+  }
+
+  await sessionCall(env, chatId, { op: "setSections", pageId, items: sections });
+
+  for (let start = 0; start < sections.length; start += BUTTONS_PER_MESSAGE) {
+    const chunk = sections.slice(start, start + BUTTONS_PER_MESSAGE);
+    const buttons = chunk.map((section, offset) => [
+      { text: buttonLabel(section.title), callback_data: `ret:${start + offset}` },
+    ]);
+    const header =
+      start === 0
+        ? `Sections (${sections.length})${pageUrl ? `\n${pageUrl}` : ""}\nTap one to read it:`
+        : `Sections ${start + 1}–${start + chunk.length}:`;
+    await sendKeyboardMessage(env, chatId, header, buttons);
+  }
+}
+
+async function handleCallback(env: Env, query: TgCallbackQuery): Promise<void> {
+  const chatId = query.message?.chat?.id;
+  if (!chatId) return;
+
+  if (!(await chatAllowed(env, chatId))) {
+    await answerCallbackQuery(env, query.id);
+    return;
+  }
+
+  const data = query.data ?? "";
+  const index = Number(data.startsWith("ret:") ? data.slice(4) : NaN);
+  if (!Number.isInteger(index) || index < 0) {
+    await answerCallbackQuery(env, query.id, "Unknown entry.");
+    return;
+  }
+
+  await answerCallbackQuery(env, query.id, "Loading…");
+  await retrieveSection(env, chatId, index);
+}
+
+/** Send one section back to Telegram: audio, image, then the formatted text. */
+async function retrieveSection(env: Env, chatId: number, index: number): Promise<void> {
+  const session = await sessionCall(env, chatId, { op: "get" });
+  const section = session.sections[index];
+  if (!section) {
+    await sendMessage(env, chatId, "That list has expired. Send /sections again.");
+    return;
+  }
+
+  await sendMessage(env, chatId, `Reading: ${section.title}`);
+
+  let content: SectionContent;
+  try {
+    content = await getSectionContent(env, section.id);
+  } catch (error) {
+    await sendMessage(env, chatId, `Could not read that entry: ${messageOf(error)}`);
+    return;
+  }
+
+  for (const audio of content.audios) {
+    const url = audio.url;
+    if (url && (await trySend(() => sendAudio(env, chatId, url, audio.caption)))) continue;
+    await sendMessage(env, chatId, url ? `Audio: ${url}` : "Audio: no link available.");
+  }
+
+  for (const image of content.images) {
+    const url = image.url;
+    if (url && (await trySend(() => sendPhoto(env, chatId, url, image.caption)))) continue;
+    await sendMessage(env, chatId, url ? `Image: ${url}` : "Image: no link available.");
+  }
+
+  if (content.html.length > 0) {
+    await sendHtml(env, chatId, content.html);
+  } else if (content.audios.length === 0 && content.images.length === 0) {
+    await sendMessage(env, chatId, "That entry is empty.");
+  }
+}
+
+/** Media URLs from Notion can fail (expired signature); fall back to a link. */
+async function trySend(send: () => Promise<void>): Promise<boolean> {
+  try {
+    await send();
+    return true;
+  } catch (error) {
+    console.error("media send failed", messageOf(error));
+    return false;
   }
 }
 

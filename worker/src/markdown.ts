@@ -139,6 +139,48 @@ function codeBlock(code: string, language = "plain text"): Block {
   };
 }
 
+interface NotionRichItem {
+  plain_text?: string;
+  href?: string | null;
+  annotations?: Record<string, boolean>;
+  text?: { content?: string; link?: { url?: string } | null };
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function escapeAttr(url: string): string {
+  return escapeHtml(url).replace(/"/g, "&quot;");
+}
+
+/**
+ * Notion rich_text -> Telegram HTML, keeping bold/italic/code/strike/links.
+ * Used when reading existing entries back out of Notion.
+ */
+export function richTextToHtml(items: unknown): string {
+  if (!Array.isArray(items)) return "";
+  return items
+    .map((raw) => {
+      const item = raw as NotionRichItem;
+      let text = item.plain_text ?? item.text?.content ?? "";
+      if (!text) return "";
+      text = escapeHtml(text);
+
+      const a = item.annotations ?? {};
+      if (a.code) text = `<code>${text}</code>`;
+      if (a.bold) text = `<b>${text}</b>`;
+      if (a.italic) text = `<i>${text}</i>`;
+      if (a.strikethrough) text = `<s>${text}</s>`;
+      if (a.underline) text = `<u>${text}</u>`;
+
+      const url = item.href ?? item.text?.link?.url;
+      if (url) text = `<a href="${escapeAttr(url)}">${text}</a>`;
+      return text;
+    })
+    .join("");
+}
+
 const ALLOWED = new Set([
   "paragraph",
   "quote",

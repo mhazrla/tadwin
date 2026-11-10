@@ -20,6 +20,7 @@ toggle per entry, order **audio → image → text**, `>` lines become `quote`, 
 | Command | Aliases | What it does |
 |---|---|---|
 | `/start` | — | Welcome message and instructions |
+| `/sections [link]` | `/daftar` | List existing entries as buttons; tap one to read it |
 | `/title <text>` | `/judul` | Set the entry title (supports `**bold**` / `*italic*`) |
 | `/status` | — | Show the current session |
 | `/done` | `/selesai` | Build the entry in Notion |
@@ -27,6 +28,20 @@ toggle per entry, order **audio → image → text**, `>` lines become `quote`, 
 | `/help` | — | Show help |
 
 `/setup/<WEBHOOK_SECRET>` registers both the webhook and this command menu in one call.
+
+## Reading entries back
+
+`/sections` lists the toggle headings of the session page (or `/sections <link>` for any page) as an
+inline keyboard. Tapping a button fetches that toggle's children and sends them to Telegram: audio as
+a playable file, image as a photo with its caption, then the text as Telegram HTML (bold, italic,
+code, strike, links, quotes, lists, headings preserved).
+
+The webhook must receive `callback_query` updates for the buttons to work — `/setup` sets
+`allowed_updates: ["message", "callback_query"]`. Re-run `/setup` after upgrading from an older
+version, otherwise taps are silently dropped.
+
+Notion returns signed media URLs that expire after about an hour; they are used immediately and never
+stored. If a URL has expired, the bot sends the link as text instead.
 
 ## Requirements
 

@@ -74,11 +74,27 @@ The bot registers these in Telegram's command menu, so typing `/` shows the list
 | Command | Aliases | What it does |
 |---|---|---|
 | `/start` | — | Welcome message and instructions |
+| `/sections [link]` | `/daftar` | List existing entries as buttons; tap one to read it |
 | `/title <text>` | `/judul` | Set the entry title (supports `**bold**` / `*italic*`) |
 | `/status` | — | Show the current session: page, title, material size, audio, image |
 | `/done` | `/selesai` | Build the entry in Notion |
 | `/cancel` | `/batal` | Clear the current session |
 | `/help` | — | Show help |
+
+## Reading existing entries
+
+Send `/sections` (uses the page already in the session) or `/sections <link>` to point at any page.
+Tadwin lists every toggle heading on that page as an inline button — the label keeps the start and
+end of the title, so long `Halaqah …` titles stay distinguishable. Tap one and the bot sends that
+entry back:
+
+- **Audio** — sent as a playable file (Telegram fetches the Notion URL directly).
+- **Image** — sent as a photo, with its Notion caption.
+- **Text** — sent with formatting preserved (bold, italic, code, strike, links, quotes, lists, headings).
+
+Nothing is modified on the Notion side. Notion media URLs are signed and expire after roughly an
+hour, so they are fetched immediately and never stored; if a URL has already expired the bot falls
+back to sending the link as text.
 
 ---
 

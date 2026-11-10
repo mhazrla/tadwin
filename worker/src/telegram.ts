@@ -83,7 +83,8 @@ export async function setWebhook(env: Env, url: string): Promise<unknown> {
   return tg(env, "setWebhook", {
     url,
     drop_pending_updates: true,
-    allowed_updates: ["message"],
+    // callback_query carries the inline-button taps.
+    allowed_updates: ["message", "callback_query"],
   });
 }
 
@@ -93,4 +94,126 @@ export async function setMyCommands(
   commands: Array<{ command: string; description: string }>,
 ): Promise<unknown> {
   return tg(env, "setMyCommands", { commands });
+}
+
+export interface InlineButton {
+  text: string;
+  callback_data: string;
+}
+
+/** A message carrying an inline keyboard, used for the section list. */
+export async function sendKeyboardMessage(
+  env: Env,
+  chatId: number,
+  text: string,
+  buttons: InlineButton[][],
+): Promise<void> {
+  await tg(env, "sendMessage", {
+    chat_id: chatId,
+    text,
+    disable_web_page_preview: true,
+    reply_markup: { inline_keyboard: buttons },
+  });
+}
+
+export async function answerCallbackQuery(
+  env: Env,
+  callbackQueryId: string,
+  text?: string,
+): Promise<void> {
+  const payload: Record<string, unknown> = { callback_query_id: callbackQueryId };
+  if (text) payload.text = text;
+  await tg(env, "answerCallbackQuery", payload);
+}
+
+/** Send an image straight from a URL; Telegram fetches it itself. */
+export async function sendPhoto(
+  env: Env,
+  chatId: number,
+  url: string,
+  caption?: string,
+): Promise<void> {
+  const payload: Record<string, unknown> = { chat_id: chatId, photo: url };
+  if (caption) {
+    payload.caption = caption.slice(0, 1024);
+    payload.parse_mode = "HTML";
+  }
+  await tg(env, "sendPhoto", payload);
+}
+
+/** Send an audio file straight from a URL; Telegram fetches it itself. */
+export async function sendAudio(
+  env: Env,
+  chatId: number,
+  url: string,
+  caption?: string,
+): Promise<void> {
+  const payload: Record<string, unknown> = { chat_id: chatId, audio: url };
+  if (caption) {
+    payload.caption = caption.slice(0, 1024);
+    payload.parse_mode = "HTML";
+  }
+  await tg(env, "sendAudio", payload);
+}
+
+const HTML_LIMIT = 3800;
+
+/** Strip tags for the rare oversized block, decoding the entities we produced. */
+function stripTags(html: string): string {
+  return html
+    .replace(/<[^>]*>/g, "")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, "&");
+}
+
+/**
+ * Send pre-built HTML blocks, grouping them so no message splits a tag pair.
+ * A single block larger than the limit falls back to plain text.
+ */
+export async function sendHtml(
+  env: Env,
+  chatId: number,
+  blocks: string[],
+): Promise<void> {
+  const messages: string[] = [];
+  let buffer = "";
+
+  for (const block of blocks) {
+    if (!block.trim()) continue;
+    if (block.length > HTML_LIMIT) {
+      if (buffer) {
+        messages.push(buffer);
+        buffer = "";
+      }
+      messages.push(block);
+      continue;
+    }
+    if (buffer && buffer.length + block.length + 1 > HTML_LIMIT) {
+      messages.push(buffer);
+      buffer = "";
+    }
+    buffer = buffer ? `${buffer}\n${block}` : block;
+  }
+  if (buffer) messages.push(buffer);
+
+  for (const message of messages) {
+    if (message.length <= 4000) {
+      await tg(env, "sendMessage", {
+        chat_id: chatId,
+        text: message,
+        parse_mode: "HTML",
+        disable_web_page_preview: true,
+      });
+      continue;
+    }
+    for (const part of splitText(stripTags(message), 4000)) {
+      await tg(env, "sendMessage", {
+        chat_id: chatId,
+        text: part,
+        disable_web_page_preview: true,
+      });
+    }
+  }
 }
