@@ -116,6 +116,14 @@ Nothing is modified on the Notion side. Notion media URLs are signed and expire 
 hour, so they are fetched immediately and never stored; if a URL has already expired the bot falls
 back to sending the link as text.
 
+## Preview before /done
+
+`/done` no longer builds immediately. It shows a preview first: title, material length, audio/image
+counts, and block types. Buttons: **Send** (build), **Edit title**, **Edit material**, and a
+**Ringkas (AI)** / **Raw (tanpa AI)** toggle to switch between AI-formatted (summarized explanatory
+text, dalil/Arab preserved verbatim) and raw local parsing. AI failures fall back to the local parser
+and never drop dalil or Arabic text.
+
 ## Navigation after a pick
 
 After tapping an entry or a child page, the bot sends **Back** and **Home** buttons (when they make
