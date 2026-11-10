@@ -193,6 +193,18 @@ export class SessionDO {
         return Response.json(value);
       }
 
+      case "setLastDone": {
+        const value =
+          typeof body.value === "number" && body.value > 0 ? body.value : Date.now();
+        await this.state.storage.put("lastDone", value);
+        return Response.json(value);
+      }
+
+      case "getLastDone": {
+        const value = (await this.state.storage.get<number>("lastDone")) ?? 0;
+        return Response.json(value);
+      }
+
       default:
         return Response.json({ error: "bad op" }, { status: 400 });
     }

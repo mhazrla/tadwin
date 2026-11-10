@@ -92,7 +92,8 @@ export function audioUpload(name: string, rawMime: string | undefined): AudioUpl
   const contentType = EXT_MIME[extOf(name)] ?? audioMime(rawMime);
   if (!contentType) return null;
 
-  const base = name.replace(/\.[^./\\]*$/, "").trim() || "audio";
+  const basename = name.split(/[/\\]/).pop() ?? name;
+  const base = basename.replace(/\.[^./\\]*$/, "").trim() || "audio";
   return { filename: base + AUDIO_EXT[contentType], contentType };
 }
 

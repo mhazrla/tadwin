@@ -343,10 +343,19 @@ async function handleCommand(env: Env, chatId: number, text: string): Promise<vo
       return;
 
     case "/done":
-    case "/selesai":
+    case "/selesai": {
+      const last = await lastDone(env, chatId);
+      const now = Date.now();
+      if (now - last < DONE_COOLDOWN_MS) {
+        const wait = Math.ceil((DONE_COOLDOWN_MS - (now - last)) / 1000);
+        await sendMessage(env, chatId, `Please wait ${wait} seconds before running /done again.`);
+        return;
+      }
+      await setLastDone(env, chatId, now);
       await sendMessage(env, chatId, "Processing... \u23F3");
       await processEntry(env, chatId);
       return;
+    }
 
     default:
       await sendMessage(env, chatId, HELP);
@@ -416,6 +425,9 @@ function buildListPage(
 }
 
 const CLEAR_CHAT_COOLDOWN_MS = 30_000;
+const DONE_COOLDOWN_MS = 10_000;
+const MAX_MATERIAL_CHARS = 100_000;
+const MAX_TEXT_FILE_BYTES = 5 * 1024 * 1024;
 
 async function lastClearChat(env: Env, chatId: number): Promise<number> {
   const stub = env.SESSIONS.get(env.SESSIONS.idFromName(`chat:${chatId}`));
@@ -433,6 +445,25 @@ async function setLastClearChat(env: Env, chatId: number, value: number): Promis
   await stub.fetch("https://do/", {
     method: "POST",
     body: JSON.stringify({ op: "setLastClearChat", value }),
+  });
+}
+
+async function lastDone(env: Env, chatId: number): Promise<number> {
+  const stub = env.SESSIONS.get(env.SESSIONS.idFromName(`chat:${chatId}`));
+  const resp = await stub.fetch("https://do/", {
+    method: "POST",
+    body: JSON.stringify({ op: "getLastDone" }),
+  });
+  if (!resp.ok) return 0;
+  const data = (await resp.json()) as unknown;
+  return typeof data === "number" ? data : 0;
+}
+
+async function setLastDone(env: Env, chatId: number, value: number): Promise<void> {
+  const stub = env.SESSIONS.get(env.SESSIONS.idFromName(`chat:${chatId}`));
+  await stub.fetch("https://do/", {
+    method: "POST",
+    body: JSON.stringify({ op: "setLastDone", value }),
   });
 }
 
@@ -565,7 +596,8 @@ async function browsePage(env: Env, chatId: number, pageId: string): Promise<voi
   try {
     ({ sections, pages } = await listPageContent(env, pageId));
   } catch (error) {
-    await sendMessage(env, chatId, `Could not read the page: ${messageOf(error)}`);
+    console.error("read page failed", error);
+      await sendMessage(env, chatId, "Could not read that page. See logs for details.");
     return;
   }
 
@@ -598,7 +630,8 @@ async function browsePage(env: Env, chatId: number, pageId: string): Promise<voi
   try {
     content = await getSectionContent(env, pageId);
   } catch (error) {
-    await sendMessage(env, chatId, `Could not read that page: ${messageOf(error)}`);
+    console.error("read page failed", error);
+      await sendMessage(env, chatId, "Could not read that page. See logs for details.");
     return;
   }
   await sendContent(env, chatId, content);
@@ -733,7 +766,8 @@ async function retrieveSection(
   try {
     content = await getSectionContent(env, section.id);
   } catch (error) {
-    await sendMessage(env, chatId, `Could not read that entry: ${messageOf(error)}`);
+    console.error("read entry failed", error);
+    await sendMessage(env, chatId, "Could not read that entry. See logs for details.");
     return;
   }
 
@@ -803,6 +837,15 @@ async function handleText(env: Env, chatId: number, msg: TgMessage): Promise<voi
     return;
   }
 
+  if (text.length > MAX_MATERIAL_CHARS) {
+    await sendMessage(
+      env,
+      chatId,
+      `That material is too long (${text.length} characters). Limit is ${MAX_MATERIAL_CHARS}.`,
+    );
+    return;
+  }
+
   await sessionCall(env, chatId, { op: "push", field: "materials", value: text });
   await sendMessage(env, chatId, `Material received (${raw.length} characters). \u{1F4DD}`);
 }
@@ -816,9 +859,17 @@ async function handleDocument(env: Env, chatId: number, msg: TgMessage): Promise
   if (mime.startsWith("text/") || TEXT_EXT.has(ext)) {
     try {
       const file = await downloadFile(env, doc.file_id);
+      if (file.size > MAX_TEXT_FILE_BYTES) {
+        await sendMessage(env, chatId, `That file is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Limit is 5 MB.`);
+        return;
+      }
       const text = decodeText(file.bytes).trim();
       if (!text) {
         await sendMessage(env, chatId, "That text file is empty.");
+        return;
+      }
+      if (text.length > MAX_MATERIAL_CHARS) {
+        await sendMessage(env, chatId, `That file is too long (${text.length} characters). Limit is ${MAX_MATERIAL_CHARS}.`);
         return;
       }
       await sessionCall(env, chatId, { op: "push", field: "materials", value: text });
@@ -828,7 +879,8 @@ async function handleDocument(env: Env, chatId: number, msg: TgMessage): Promise
         `Material received from file (${text.length} characters). \u{1F4C4}`,
       );
     } catch (error) {
-      await sendMessage(env, chatId, `Could not read the file: ${messageOf(error)}`);
+      console.error("read file failed", error);
+      await sendMessage(env, chatId, "Could not read that file. See logs for details.");
     }
     return;
   }
@@ -1005,7 +1057,8 @@ async function processEntry(env: Env, chatId: number): Promise<void> {
     );
     await sessionCall(env, chatId, { op: "clear" });
   } catch (error) {
-    let message = messageOf(error);
+    console.error("processEntry failed", error);
+    let message = messageOf(error).slice(0, 200);
     if (/file size|size limit|too large|exceed/i.test(message)) {
       message += "\n\nNote: the Notion Free plan limits files to 5 MB.";
     }
