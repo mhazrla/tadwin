@@ -18,6 +18,12 @@ export interface SectionRef {
   title: string;
 }
 
+/** One child page, kept so a button tap can open it. */
+export interface PageRef {
+  id: string;
+  title: string;
+}
+
 export interface SessionState {
   pageId: string | null;
   pageUrl: string | null;
@@ -27,6 +33,8 @@ export interface SessionState {
   images: ImageRef[];
   sections: SectionRef[];
   sectionsPageId: string | null;
+  pages: PageRef[];
+  pagesPageId: string | null;
 }
 
 export function emptyState(): SessionState {
@@ -39,6 +47,8 @@ export function emptyState(): SessionState {
     images: [],
     sections: [],
     sectionsPageId: null,
+    pages: [],
+    pagesPageId: null,
   };
 }
 
@@ -83,6 +93,8 @@ export class SessionDO {
           // A different page means the cached section list no longer applies.
           sections: [],
           sectionsPageId: null,
+          pages: [],
+          pagesPageId: null,
         };
         await this.state.storage.put("session", next);
         return Response.json(next);
@@ -101,6 +113,23 @@ export class SessionDO {
 
       case "clearSections": {
         const next: SessionState = { ...current, sections: [], sectionsPageId: null };
+        await this.state.storage.put("session", next);
+        return Response.json(next);
+      }
+
+      case "setPages": {
+        const items = Array.isArray(body.items) ? (body.items as PageRef[]) : [];
+        const next: SessionState = {
+          ...current,
+          pages: items,
+          pagesPageId: (body.pageId as string) ?? null,
+        };
+        await this.state.storage.put("session", next);
+        return Response.json(next);
+      }
+
+      case "clearPages": {
+        const next: SessionState = { ...current, pages: [], pagesPageId: null };
         await this.state.storage.put("session", next);
         return Response.json(next);
       }

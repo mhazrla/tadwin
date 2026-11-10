@@ -12,8 +12,10 @@ import {
   appendEntry,
   findToggleExamples,
   getSectionContent,
+  listPages,
   listSections,
   uploadFile,
+  type PageRef,
   type SectionContent,
 } from "./notion";
 import { entitiesToMarkdown } from "./markdown";
@@ -45,8 +47,10 @@ const HELP =
   "3. Send the material: plain text, or a .txt file for long notes.\n" +
   "4. Send audio, then an image (the caption becomes the description).\n" +
   "5. /done to build the entry.\n\n" +
-  "To read what is already on a page, send /sections (or /sections <link>), then tap an entry.\n\n" +
+  "To read what is already on a page, send /sections (or /sections <link>), then tap an entry.\n" +
+  "To open a child page, send /pages (or /pages <link>), then tap it.\n\n" +
   "Commands:\n" +
+  "/pages  list child pages and open one\n" +
   "/sections  browse existing entries and read one\n" +
   "/title  set the entry title\n" +
   "/status  show the current session\n" +
@@ -57,6 +61,7 @@ const HELP =
 /** Shown in Telegram's command menu (also registered via setMyCommands). */
 const COMMANDS = [
   { command: "start", description: "How to use the bot" },
+  { command: "pages", description: "List child pages and open one" },
   { command: "sections", description: "Browse and read existing entries" },
   { command: "title", description: "Set the entry title" },
   { command: "status", description: "Show the current session" },
@@ -234,6 +239,13 @@ async function handleCommand(env: Env, chatId: number, text: string): Promise<vo
     }
 
     // Indonesian aliases are kept so older habits keep working.
+    case "/pages":
+    case "/halaman": {
+      const value = text.replace(/^\/(?:pages|halaman)(@\w+)?\s*/i, "").trim();
+      await handlePages(env, chatId, value);
+      return;
+    }
+
     case "/sections":
     case "/daftar": {
       const value = text.replace(/^\/(?:sections|daftar)(@\w+)?\s*/i, "").trim();
@@ -287,30 +299,49 @@ function buttonLabel(title: string): string {
   return `${text.slice(0, 28).trimEnd()}…${text.slice(-28).trimStart()}`;
 }
 
-interface SectionPage {
+interface ListPage {
   text: string;
   keyboard: InlineButton[][];
 }
 
-/** One page of the section list: 8 entries plus a Prev / page / Next row. */
-function buildSectionPage(sections: SectionRef[], page: number): SectionPage {
-  const pages = Math.max(1, Math.ceil(sections.length / BUTTONS_PER_PAGE));
+type ListKind = "sections" | "pages";
+
+const LIST_KIND: Record<
+  ListKind,
+  { pagePrefix: string; itemPrefix: string; noun: string; hint: string }
+> = {
+  sections: { pagePrefix: "pg:", itemPrefix: "ret:", noun: "Sections", hint: "Tap one to read it:" },
+  pages: { pagePrefix: "pgp:", itemPrefix: "open:", noun: "Pages", hint: "Tap one to open it:" },
+};
+
+/** One page of a list: 8 entries plus a Prev / page / Next row. */
+function buildListPage(
+  items: Array<{ title: string }>,
+  page: number,
+  kind: ListKind,
+): ListPage {
+  const cfg = LIST_KIND[kind];
+  const pages = Math.max(1, Math.ceil(items.length / BUTTONS_PER_PAGE));
   const safePage = Math.min(Math.max(0, page), pages - 1);
   const start = safePage * BUTTONS_PER_PAGE;
-  const chunk = sections.slice(start, start + BUTTONS_PER_PAGE);
+  const chunk = items.slice(start, start + BUTTONS_PER_PAGE);
 
-  const keyboard: InlineButton[][] = chunk.map((section, offset) => [
-    { text: buttonLabel(section.title), callback_data: `ret:${start + offset}` },
+  const keyboard: InlineButton[][] = chunk.map((item, offset) => [
+    { text: buttonLabel(item.title), callback_data: `${cfg.itemPrefix}${start + offset}` },
   ]);
 
   const nav: InlineButton[] = [];
-  if (safePage > 0) nav.push({ text: "◀ Prev", callback_data: `pg:${safePage - 1}` });
+  if (safePage > 0) {
+    nav.push({ text: "◀ Prev", callback_data: `${cfg.pagePrefix}${safePage - 1}` });
+  }
   nav.push({ text: `${safePage + 1}/${pages}`, callback_data: "cur" });
-  if (safePage < pages - 1) nav.push({ text: "Next ▶", callback_data: `pg:${safePage + 1}` });
+  if (safePage < pages - 1) {
+    nav.push({ text: "Next ▶", callback_data: `${cfg.pagePrefix}${safePage + 1}` });
+  }
   keyboard.push(nav);
 
   return {
-    text: `Sections (${sections.length}) — page ${safePage + 1}/${pages}\nTap one to read it:`,
+    text: `${cfg.noun} (${items.length}) — page ${safePage + 1}/${pages}\n${cfg.hint}`,
     keyboard,
   };
 }
@@ -352,8 +383,126 @@ async function handleSections(env: Env, chatId: number, arg: string): Promise<vo
 
   await sessionCall(env, chatId, { op: "setSections", pageId, items: sections });
 
-  const first = buildSectionPage(sections, 0);
+  const first = buildListPage(sections, 0, "sections");
   await sendKeyboardMessage(env, chatId, first.text, first.keyboard);
+}
+
+/** List the page's child pages as inline buttons and cache them in the session. */
+async function handlePages(env: Env, chatId: number, arg: string): Promise<void> {
+  let pageId: string | null = null;
+
+  if (arg) {
+    const match = arg.match(URL_RE);
+    try {
+      pageId = parsePageId(match ? match[0] : arg);
+    } catch {
+      await sendMessage(env, chatId, "That Notion link is not valid.");
+      return;
+    }
+  } else {
+    const session = await sessionCall(env, chatId, { op: "get" });
+    pageId = session.pageId;
+  }
+
+  if (!pageId) {
+    await sendMessage(env, chatId, "No Notion page yet. Send a page link, or /pages <link>.");
+    return;
+  }
+
+  let pages: PageRef[];
+  try {
+    pages = await listPages(env, pageId);
+  } catch (error) {
+    await sendMessage(env, chatId, `Could not read the page: ${messageOf(error)}`);
+    return;
+  }
+
+  if (pages.length === 0) {
+    await sendMessage(env, chatId, "No child pages found on that page.");
+    return;
+  }
+
+  await sessionCall(env, chatId, { op: "setPages", pageId, items: pages });
+
+  const first = buildListPage(pages, 0, "pages");
+  await sendKeyboardMessage(env, chatId, first.text, first.keyboard);
+}
+
+/** Open a child page: make it the session page and list its sections. */
+async function openPage(
+  env: Env,
+  chatId: number,
+  index: number,
+  listMessageId?: number,
+): Promise<void> {
+  const session = await sessionCall(env, chatId, { op: "get" });
+  const page = session.pages[index];
+  if (!page) {
+    await sendMessage(env, chatId, "That list has expired. Send /pages again.");
+    return;
+  }
+
+  if (listMessageId) {
+    try {
+      await deleteMessage(env, chatId, listMessageId);
+    } catch (error) {
+      console.error("delete list failed", messageOf(error));
+    }
+  }
+
+  await sessionCall(env, chatId, {
+    op: "setPage",
+    pageId: page.id,
+    pageUrl: `https://www.notion.so/${page.id.replace(/-/g, "")}`,
+  });
+  await sendMessage(env, chatId, `Opened: ${page.title} \u{1F4C4}`);
+
+  // Drill down: sections first, then child pages, then the page's own content.
+  await browsePage(env, chatId);
+}
+
+/** Show a page's sections; fall back to its child pages, then to its content. */
+async function browsePage(env: Env, chatId: number): Promise<void> {
+  const session = await sessionCall(env, chatId, { op: "get" });
+  const pageId = session.pageId;
+  if (!pageId) {
+    await sendMessage(env, chatId, "No Notion page yet. Send a page link.");
+    return;
+  }
+
+  let sections: SectionRef[];
+  let pages: PageRef[];
+  try {
+    sections = await listSections(env, pageId);
+    pages = sections.length ? [] : await listPages(env, pageId);
+  } catch (error) {
+    await sendMessage(env, chatId, `Could not read the page: ${messageOf(error)}`);
+    return;
+  }
+
+  if (sections.length) {
+    await sessionCall(env, chatId, { op: "setSections", pageId, items: sections });
+    const built = buildListPage(sections, 0, "sections");
+    await sendKeyboardMessage(env, chatId, built.text, built.keyboard);
+    return;
+  }
+
+  if (pages.length) {
+    await sessionCall(env, chatId, { op: "setPages", pageId, items: pages });
+    const built = buildListPage(pages, 0, "pages");
+    await sendKeyboardMessage(env, chatId, built.text, built.keyboard);
+    return;
+  }
+
+  // Leaf page: send its own content.
+  let content: SectionContent;
+  try {
+    content = await getSectionContent(env, pageId);
+  } catch (error) {
+    await sendMessage(env, chatId, `Could not read that page: ${messageOf(error)}`);
+    return;
+  }
+  await sendContent(env, chatId, content);
 }
 
 async function handleCallback(env: Env, query: TgCallbackQuery): Promise<void> {
@@ -372,10 +521,28 @@ async function handleCallback(env: Env, query: TgCallbackQuery): Promise<void> {
     return;
   }
 
+  if (data.startsWith("pgp:")) {
+    const page = Number(data.slice(4));
+    await answerCallbackQuery(env, query.id);
+    await showPagesPage(env, chatId, query.message?.message_id, page);
+    return;
+  }
+
   if (data.startsWith("pg:")) {
     const page = Number(data.slice(3));
     await answerCallbackQuery(env, query.id);
     await showSectionPage(env, chatId, query.message?.message_id, page);
+    return;
+  }
+
+  if (data.startsWith("open:")) {
+    const index = Number(data.slice(5));
+    if (!Number.isInteger(index) || index < 0) {
+      await answerCallbackQuery(env, query.id, "Unknown page.");
+      return;
+    }
+    await answerCallbackQuery(env, query.id, "Opening…");
+    await openPage(env, chatId, index, query.message?.message_id);
     return;
   }
 
@@ -389,20 +556,21 @@ async function handleCallback(env: Env, query: TgCallbackQuery): Promise<void> {
   await retrieveSection(env, chatId, index, query.message?.message_id);
 }
 
-/** Re-render the section list in place; fall back to a new message if it is gone. */
-async function showSectionPage(
+/** Re-render a list in place; fall back to a new message if it is gone. */
+async function showListPage(
   env: Env,
   chatId: number,
   messageId: number | undefined,
   page: number,
+  kind: ListKind,
+  items: Array<{ title: string }>,
 ): Promise<void> {
-  const session = await sessionCall(env, chatId, { op: "get" });
-  if (session.sections.length === 0) {
-    await sendMessage(env, chatId, "That list has expired. Send /sections again.");
+  if (items.length === 0) {
+    await sendMessage(env, chatId, "That list has expired. Send the command again.");
     return;
   }
 
-  const built = buildSectionPage(session.sections, page);
+  const built = buildListPage(items, page, kind);
   if (!messageId) {
     await sendKeyboardMessage(env, chatId, built.text, built.keyboard);
     return;
@@ -413,6 +581,26 @@ async function showSectionPage(
     console.error("edit page failed", messageOf(error));
     await sendKeyboardMessage(env, chatId, built.text, built.keyboard);
   }
+}
+
+async function showSectionPage(
+  env: Env,
+  chatId: number,
+  messageId: number | undefined,
+  page: number,
+): Promise<void> {
+  const session = await sessionCall(env, chatId, { op: "get" });
+  await showListPage(env, chatId, messageId, page, "sections", session.sections);
+}
+
+async function showPagesPage(
+  env: Env,
+  chatId: number,
+  messageId: number | undefined,
+  page: number,
+): Promise<void> {
+  const session = await sessionCall(env, chatId, { op: "get" });
+  await showListPage(env, chatId, messageId, page, "pages", session.pages);
 }
 
 /** Send one section back to Telegram: audio, image, then the formatted text. */
@@ -448,6 +636,15 @@ async function retrieveSection(
     return;
   }
 
+  await sendContent(env, chatId, content);
+}
+
+/** Audio, then image, then the formatted text for one block or page. */
+async function sendContent(
+  env: Env,
+  chatId: number,
+  content: SectionContent,
+): Promise<void> {
   for (const audio of content.audios) {
     const url = audio.url;
     if (!url) {

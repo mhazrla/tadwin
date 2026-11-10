@@ -74,12 +74,26 @@ The bot registers these in Telegram's command menu, so typing `/` shows the list
 | Command | Aliases | What it does |
 |---|---|---|
 | `/start` | — | Welcome message and instructions |
+| `/pages [link]` | `/halaman` | List child pages; tap one to open it |
 | `/sections [link]` | `/daftar` | List existing entries as buttons; tap one to read it |
 | `/title <text>` | `/judul` | Set the entry title (supports `**bold**` / `*italic*`) |
 | `/status` | — | Show the current session: page, title, material size, audio, image |
 | `/done` | `/selesai` | Build the entry in Notion |
 | `/cancel` | `/batal` | Clear the current session |
 | `/help` | — | Show help |
+
+## Browsing child pages
+
+Send `/pages` (uses the session page) or `/pages <link>` for any page. Tadwin lists that page's child
+pages as inline buttons — 8 per page, with the same `◀ Prev` / `Next ▶` navigation. Tap one and the
+list disappears while Tadwin opens the page, makes it the session page, and shows what is inside it:
+
+1. its toggle-heading entries, if it has any;
+2. otherwise its own child pages, so you can keep drilling down;
+3. otherwise the page's content itself (audio, image, and text).
+
+So a hierarchy like `Notes → MATERI HSI → 0. Pengagungan Terhadap Ilmu → Halaqah 01` can be walked one
+tap at a time, and `/done` afterwards appends to whichever page you opened last.
 
 ## Reading existing entries
 

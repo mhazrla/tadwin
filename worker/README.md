@@ -20,6 +20,7 @@ toggle per entry, order **audio → image → text**, `>` lines become `quote`, 
 | Command | Aliases | What it does |
 |---|---|---|
 | `/start` | — | Welcome message and instructions |
+| `/pages [link]` | `/halaman` | List child pages; tap one to open it |
 | `/sections [link]` | `/daftar` | List existing entries as buttons; tap one to read it |
 | `/title <text>` | `/judul` | Set the entry title (supports `**bold**` / `*italic*`) |
 | `/status` | — | Show the current session |
@@ -28,6 +29,19 @@ toggle per entry, order **audio → image → text**, `>` lines become `quote`, 
 | `/help` | — | Show help |
 
 `/setup/<WEBHOOK_SECRET>` registers both the webhook and this command menu in one call.
+
+## Browsing child pages
+
+`/pages` lists the `child_page` blocks of the session page (or `/pages <link>` for any page) as an
+inline keyboard, 8 per page; `◀ Prev` / `Next ▶` edit that same message. Tapping one deletes the
+list, sets that child page as the session page, and then drills down in this order:
+
+1. its toggle-heading entries (`/sections` behaviour), if it has any;
+2. otherwise its own child pages, so deeper levels stay reachable;
+3. otherwise the page's own content (audio, image, then HTML text).
+
+A page with neither entries nor child pages is therefore still readable, and `/done` afterwards
+appends to the page that was opened last.
 
 ## Reading entries back
 

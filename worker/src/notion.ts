@@ -87,6 +87,30 @@ export interface SectionRef {
   title: string;
 }
 
+export interface PageRef {
+  id: string;
+  title: string;
+}
+
+/** Child pages of a page, in document order. */
+export async function listPages(
+  env: Env,
+  pageId: string,
+  max = 200,
+): Promise<PageRef[]> {
+  const out: PageRef[] = [];
+  for (const block of await getChildren(env, pageId)) {
+    if (out.length >= max) break;
+    if (block.type !== "child_page") continue;
+    const obj = block.child_page as Json | undefined;
+    out.push({
+      id: block.id as string,
+      title: ((obj?.title as string) ?? "").trim() || "Untitled",
+    });
+  }
+  return out;
+}
+
 /** Toggle headings on a page, in document order — the readable "sections". */
 export async function listSections(
   env: Env,
