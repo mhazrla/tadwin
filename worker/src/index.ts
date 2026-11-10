@@ -1449,13 +1449,30 @@ async function handlePreview(env: Env, chatId: number): Promise<void> {
     const audioCount = session.audios.length;
     const imageCount = session.images.length;
 
+    // Show a snippet of the formatted text so the user can see what Ringkas vs Raw does.
+    function blockText(b: Record<string, unknown>): string {
+      const type = b.type as string | undefined;
+      const obj = type ? (b[type] as Record<string, unknown> | undefined) : undefined;
+      const arr = Array.isArray(obj?.rich_text) ? (obj.rich_text as Array<Record<string, unknown>>) : [];
+      return arr.map((r) => String((r.text as Record<string, unknown> | undefined)?.content ?? "")).join("");
+    }
+    const snippet = blocks
+      .slice(0, 3)
+      .map((b, i) => {
+        const t = blockText(b as Record<string, unknown>).trim();
+        return t ? `${i + 1}. ${t.slice(0, 120)}${t.length > 120 ? "…" : ""}` : "";
+      })
+      .filter(Boolean)
+      .join("\n");
+
     const modeLabel = mode === "raw" ? "Raw (tanpa AI)" : "Ringkas (AI)";
     const previewText =
       "Preview [" + modeLabel + "]\n" +
       `Title: ${title}\n` +
       `Material: ${material.length} chars\n` +
       `Audio: ${audioCount}  Image: ${imageCount}\n` +
-      `Blocks: ${blocks.length} (${summary})`;
+      `Blocks: ${blocks.length} (${summary})\n\n` +
+      (snippet ? `${snippet}` : "");
 
     const toggleBtn =
       mode === "raw"
