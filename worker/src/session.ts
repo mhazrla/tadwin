@@ -181,6 +181,18 @@ export class SessionDO {
         return Response.json({ count: 0 });
       }
 
+      case "setLastClearChat": {
+        const value =
+          typeof body.value === "number" && body.value > 0 ? body.value : Date.now();
+        await this.state.storage.put("lastClearChat", value);
+        return Response.json(value);
+      }
+
+      case "getLastClearChat": {
+        const value = (await this.state.storage.get<number>("lastClearChat")) ?? 0;
+        return Response.json(value);
+      }
+
       default:
         return Response.json({ error: "bad op" }, { status: 400 });
     }

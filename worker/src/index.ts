@@ -415,6 +415,27 @@ function buildListPage(
   };
 }
 
+const CLEAR_CHAT_COOLDOWN_MS = 30_000;
+
+async function lastClearChat(env: Env, chatId: number): Promise<number> {
+  const stub = env.SESSIONS.get(env.SESSIONS.idFromName(`chat:${chatId}`));
+  const resp = await stub.fetch("https://do/", {
+    method: "POST",
+    body: JSON.stringify({ op: "getLastClearChat" }),
+  });
+  if (!resp.ok) return 0;
+  const data = (await resp.json()) as unknown;
+  return typeof data === "number" ? data : 0;
+}
+
+async function setLastClearChat(env: Env, chatId: number, value: number): Promise<void> {
+  const stub = env.SESSIONS.get(env.SESSIONS.idFromName(`chat:${chatId}`));
+  await stub.fetch("https://do/", {
+    method: "POST",
+    body: JSON.stringify({ op: "setLastClearChat", value }),
+  });
+}
+
 /** Read the stored bot message IDs without pretending they are a session object. */
 async function botMessages(env: Env, chatId: number): Promise<number[]> {
   const stub = env.SESSIONS.get(env.SESSIONS.idFromName(`chat:${chatId}`));
@@ -438,6 +459,15 @@ async function handleClearChat(env: Env, chatId: number): Promise<void> {
     await sendMessage(env, chatId, "Nothing to clear in this chat.");
     return;
   }
+
+  const last = await lastClearChat(env, chatId);
+  const now = Date.now();
+  if (now - last < CLEAR_CHAT_COOLDOWN_MS) {
+    const wait = Math.ceil((CLEAR_CHAT_COOLDOWN_MS - (now - last)) / 1000);
+    await sendMessage(env, chatId, `Please wait ${wait} seconds before clearing again.`);
+    return;
+  }
+  await setLastClearChat(env, chatId, now);
 
   const started = Date.now();
   let deleted = 0;

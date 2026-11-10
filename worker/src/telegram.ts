@@ -11,19 +11,32 @@ export async function tg<T = unknown>(
   method: string,
   payload: Record<string, unknown>,
 ): Promise<T> {
-  const resp = await fetch(
-    `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    },
-  );
-  const data = (await resp.json()) as TgResponse<T>;
-  if (!data.ok) {
+  const MAX_RETRIES = 1;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const resp = await fetch(
+      `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    );
+    const data = (await resp.json()) as TgResponse<T>;
+    if (data.ok) return data.result as T;
+
+    // Telegram rate limit: back off briefly, then retry once.
+    if (resp.status === 429 && attempt < MAX_RETRIES) {
+      const retryAfter = Number(
+        (data as { parameters?: { retry_after?: number } }).parameters?.retry_after ?? 1,
+      );
+      const wait = Math.min(Math.max(retryAfter, 1), 5) * 1000;
+      await new Promise((resolve) => setTimeout(resolve, wait));
+      continue;
+    }
+
     throw new Error(`Telegram ${method}: ${data.description ?? resp.status}`);
   }
-  return data.result as T;
+  throw new Error(`Telegram ${method}: failed after retry`);
 }
 
 function splitText(text: string, size = 4000): string[] {
