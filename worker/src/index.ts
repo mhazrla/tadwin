@@ -22,6 +22,7 @@ import {
   answerCallbackQuery,
   downloadFile,
   sendAudio,
+  sendDocument,
   sendHtml,
   sendKeyboardMessage,
   sendMessage,
@@ -377,14 +378,24 @@ async function retrieveSection(env: Env, chatId: number, index: number): Promise
 
   for (const audio of content.audios) {
     const url = audio.url;
-    if (url && (await trySend(() => sendAudio(env, chatId, url, audio.caption)))) continue;
-    await sendMessage(env, chatId, url ? `Audio: ${url}` : "Audio: no link available.");
+    if (!url) {
+      await sendMessage(env, chatId, "Audio: no link available.");
+      continue;
+    }
+    if (await trySend(() => sendAudio(env, chatId, url, audio.caption))) continue;
+    if (await trySend(() => sendDocument(env, chatId, url, audio.caption))) continue;
+    await sendMessage(env, chatId, `Audio: ${url}`);
   }
 
   for (const image of content.images) {
     const url = image.url;
-    if (url && (await trySend(() => sendPhoto(env, chatId, url, image.caption)))) continue;
-    await sendMessage(env, chatId, url ? `Image: ${url}` : "Image: no link available.");
+    if (!url) {
+      await sendMessage(env, chatId, "Image: no link available.");
+      continue;
+    }
+    if (await trySend(() => sendPhoto(env, chatId, url, image.caption))) continue;
+    if (await trySend(() => sendDocument(env, chatId, url, image.caption))) continue;
+    await sendMessage(env, chatId, `Image: ${url}`);
   }
 
   if (content.html.length > 0) {

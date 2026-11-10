@@ -156,6 +156,21 @@ export async function sendAudio(
   await tg(env, "sendAudio", payload);
 }
 
+/** Send any file straight from a URL; used when audio/photo handling rejects it. */
+export async function sendDocument(
+  env: Env,
+  chatId: number,
+  url: string,
+  caption?: string,
+): Promise<void> {
+  const payload: Record<string, unknown> = { chat_id: chatId, document: url };
+  if (caption) {
+    payload.caption = caption.slice(0, 1024);
+    payload.parse_mode = "HTML";
+  }
+  await tg(env, "sendDocument", payload);
+}
+
 const HTML_LIMIT = 3800;
 
 /** Strip tags for the rare oversized block, decoding the entities we produced. */
