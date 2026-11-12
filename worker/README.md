@@ -122,6 +122,11 @@ curl "https://tadwin.<subdomain>.workers.dev/setup/<WEBHOOK_SECRET>"
 
 A successful response contains `{"url":"...","result":true}`. Then send `/start` to the bot.
 
+> Telegram stores the webhook URL on its side; it changes only when `/setup` is called. If you rename the
+> Worker in `wrangler.toml`, deploy under a different name, or recreate it, the webhook keeps pointing
+> at the old URL and the bot appears frozen — re-run `/setup` and check
+> `getWebhookInfo` (the URL must match the Worker you just deployed).
+
 > Use a dedicated bot token. If another program polls the same bot, webhook and long polling will fight
 > over updates and messages will go missing.
 
