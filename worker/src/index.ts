@@ -33,6 +33,7 @@ import {
   sendPhoto as tgSendPhoto,
   setMyCommands,
   setWebhook,
+  webhookSecretToken,
   type InlineButton,
 } from "./telegram";
 
@@ -203,6 +204,10 @@ export default {
     const secret = env.WEBHOOK_SECRET;
 
     if (request.method === "POST" && url.pathname === `/webhook/${secret}`) {
+      // Telegram is the only caller that can know this token.
+      if (request.headers.get("X-Telegram-Bot-Api-Secret-Token") !== webhookSecretToken(env)) {
+        return new Response("forbidden", { status: 403 });
+      }
       let update: TgUpdate;
       try {
         update = (await request.json()) as TgUpdate;
@@ -219,6 +224,11 @@ export default {
     }
 
     if (url.pathname === `/setup/${secret}`) {
+      // Mutating a global Telegram setting must not be triggerable by a link
+      // preview or a stray GET; require an explicit POST.
+      if (request.method !== "POST") {
+        return new Response("use POST", { status: 405 });
+      }
       const target = `${url.origin}/webhook/${secret}`;
       try {
         const result = await setWebhook(env, target);

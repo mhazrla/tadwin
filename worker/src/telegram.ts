@@ -95,12 +95,22 @@ export async function downloadFile(
   return { bytes, size: size || bytes.byteLength };
 }
 
+/**
+ * Telegram echoes this value back in the `X-Telegram-Bot-Api-Secret-Token`
+ * header on every webhook call, so the Worker can reject spoofed updates.
+ * Only A-Za-z0-9_- is allowed by Bot API.
+ */
+export function webhookSecretToken(env: Env): string {
+  return (env.WEBHOOK_SECRET || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 256);
+}
+
 export async function setWebhook(env: Env, url: string): Promise<unknown> {
   return tg(env, "setWebhook", {
     url,
     drop_pending_updates: true,
     // callback_query carries the inline-button taps.
     allowed_updates: ["message", "callback_query"],
+    secret_token: webhookSecretToken(env),
   });
 }
 

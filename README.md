@@ -32,7 +32,7 @@ npm run deploy
 Wrangler prints a URL such as `https://tadwin.<subdomain>.workers.dev`. Register the webhook once:
 
 ```bash
-curl "https://tadwin.<subdomain>.workers.dev/setup/<WEBHOOK_SECRET>"
+curl -X POST "https://tadwin.<subdomain>.workers.dev/setup/<WEBHOOK_SECRET>"
 # {"url":"https://.../webhook/...","result":true}
 ```
 

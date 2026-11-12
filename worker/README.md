@@ -29,7 +29,7 @@ toggle per entry, order **audio → image → text**, `>` lines become `quote`, 
 | `/clearchat` | `/bersihkan` | Clear the bot's messages in this chat, keeping the first `/start` guide |
 | `/help` | — | Show help |
 
-`/setup/<WEBHOOK_SECRET>` registers both the webhook and this command menu in one call.
+`/setup/<WEBHOOK_SECRET>` registers both the webhook and this command menu in one POST.
 
 ## Browsing a page
 
@@ -118,7 +118,7 @@ After `npm run deploy`, wrangler prints the URL, for example
 Register the webhook once (open in a browser or use curl):
 
 ```bash
-curl "https://tadwin.<subdomain>.workers.dev/setup/<WEBHOOK_SECRET>"
+curl -X POST "https://tadwin.<subdomain>.workers.dev/setup/<WEBHOOK_SECRET>"
 ```
 
 A successful response contains `{"url":"...","result":true}`. Then send `/start` to the bot.
@@ -207,7 +207,7 @@ src/
 
 | Symptom | Cause / fix |
 |---|---|
-| No reply at all | Webhook not registered — open `/setup/<WEBHOOK_SECRET>`. Also check you are messaging the right bot. |
+| No reply at all | Webhook not registered - POST `/setup/<WEBHOOK_SECRET>`. Also check you are messaging the right bot. |
 | `Unauthorized` from `/setup` | Wrong or malformed `TELEGRAM_BOT_TOKEN`; re-upload secrets. |
 | `Failed to resolve host` | Telegram could not resolve the worker hostname — try a different Worker name. |
 | `409 Conflict` | Another program is polling the same bot token; stop it. |
