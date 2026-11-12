@@ -29,10 +29,10 @@ npx wrangler secret bulk .dev.vars
 npm run deploy
 ```
 
-Wrangler prints a URL such as `https://tadwin-bot.<subdomain>.workers.dev`. Register the webhook once:
+Wrangler prints a URL such as `https://tadwin.<subdomain>.workers.dev`. Register the webhook once:
 
 ```bash
-curl "https://tadwin-bot.<subdomain>.workers.dev/setup/<WEBHOOK_SECRET>"
+curl "https://tadwin.<subdomain>.workers.dev/setup/<WEBHOOK_SECRET>"
 # {"url":"https://.../webhook/...","result":true}
 ```
 

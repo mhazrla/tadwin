@@ -75,7 +75,7 @@ stored. If a URL has expired, the bot sends the link as text instead.
 
 ## Monitoring
 
-- **Logs**: `npx wrangler tail` (real-time) or Cloudflare Dashboard → Workers → `tadwin-bot` → Logs.
+- **Logs**: `npx wrangler tail` (real-time) or Cloudflare Dashboard → Workers → `tadwin` → Logs.
 - **Read-only guests**: if `OWNER_CHAT_ID` is set, only that user can add/edit entries. Others can browse and read (audio/image/text) but cannot submit material or run `/done`/`/title`.
 
 ## Setup
@@ -112,12 +112,12 @@ npx wrangler secret put ALLOWED_CHAT_IDS  # e.g. 123456789,987654321
 ```
 
 After `npm run deploy`, wrangler prints the URL, for example
-`https://tadwin-bot.<subdomain>.workers.dev`.
+`https://tadwin.<subdomain>.workers.dev`.
 
 Register the webhook once (open in a browser or use curl):
 
 ```bash
-curl "https://tadwin-bot.<subdomain>.workers.dev/setup/<WEBHOOK_SECRET>"
+curl "https://tadwin.<subdomain>.workers.dev/setup/<WEBHOOK_SECRET>"
 ```
 
 A successful response contains `{"url":"...","result":true}`. Then send `/start` to the bot.
@@ -135,7 +135,7 @@ npm run deploy
 The URL, secrets, Durable Object, and webhook stay the same. Useful commands:
 
 ```bash
-npx wrangler tail tadwin-bot          # live logs
+npx wrangler tail tadwin          # live logs
 npx wrangler deployments list         # version history
 npx wrangler rollback                 # revert to the previous version
 ```
@@ -145,7 +145,7 @@ npx wrangler rollback                 # revert to the previous version
 Gemini model IDs rotate. List the ones available to your key:
 
 ```bash
-curl "https://tadwin-bot.<subdomain>.workers.dev/models/<WEBHOOK_SECRET>"
+curl "https://tadwin.<subdomain>.workers.dev/aistatus/<WEBHOOK_SECRET>"
 ```
 
 Pick a chat-capable `id` (without the `models/` prefix) and set it:
