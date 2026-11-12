@@ -80,7 +80,7 @@ The bot registers these in Telegram's command menu, so typing `/` shows the list
 | `/status` | — | Show the current session: page, title, material size, audio, image |
 | `/done` | `/selesai` | Build the entry in Notion |
 | `/cancel` | `/batal` | Clear the current session |
-| `/clearchat` | `/bersihkan` | Delete the bot's messages in this chat (only its own, within 48 h) |
+| `/clearchat` | `/bersihkan` | Clear the bot's messages in this chat, keeping the first `/start` guide |
 | `/help` | — | Show help |
 
 ## Browsing a page
@@ -138,7 +138,8 @@ sense): **Back** re-opens the list you came from (or the previous level), **Home
 you first browsed. At the home page itself only **Back** is shown, to re-open the current list.
 
 ## Clearing the chat
-`/clearchat` (alias `/bersihkan`) deletes the messages the bot sent in this chat. Telegram only
+`/clearchat` (alias `/bersihkan`) deletes the messages the bot sent in this chat, except the first
+`/start` guide message, which is kept as a permanent command reference. Telegram only
 skipped. Your own messages stay. IDs are remembered from now on; messages sent before this feature
 was deployed cannot be removed by the bot.
 

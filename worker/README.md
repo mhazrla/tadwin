@@ -26,7 +26,7 @@ toggle per entry, order **audio → image → text**, `>` lines become `quote`, 
 | `/status` | — | Show the current session |
 | `/done` | `/selesai` | Build the entry in Notion |
 | `/cancel` | `/batal` | Clear the current session |
-| `/clearchat` | `/bersihkan` | Delete the bot's messages in this chat (only its own, within 48 h) |
+| `/clearchat` | `/bersihkan` | Clear the bot's messages in this chat, keeping the first `/start` guide |
 | `/help` | — | Show help |
 
 `/setup/<WEBHOOK_SECRET>` registers both the webhook and this command menu in one call.
@@ -66,7 +66,8 @@ stored. If a URL has expired, the bot sends the link as text instead.
 
 ## Clearing the chat
 
-`/clearchat` (alias `/bersihkan`) deletes the messages the bot sent in this chat. Telegram only allows a bot to delete its own messages, and only within 48 hours, so older messages are counted as skipped and the rest of the list is cleared. Your own messages stay. The bot remembers the IDs of messages it sends from now on; messages sent before this feature was deployed cannot be removed by the bot.
+`/clearchat` (alias `/bersihkan`) deletes the messages the bot sent in this chat, except the first
+`/start` guide message, which is kept as a permanent command reference. Telegram only allows a bot to delete its own messages, and only within 48 hours, so older messages are counted as skipped and the rest of the list is cleared. Your own messages stay. The bot remembers the IDs of messages it sends from now on; messages sent before this feature was deployed cannot be removed by the bot.
 
 - A Cloudflare account (free).
 - A Telegram bot token from [@BotFather](https://t.me/BotFather).

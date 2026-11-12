@@ -75,6 +75,7 @@ type PushField = "materials" | "audios" | "images";
  * (which deletes the session) cannot erase the record /clearchat depends on.
  */
 const MESSAGES_KEY = "botMessages";
+const GUIDE_KEY = "guideMessageId";
 const MAX_TRACKED_MESSAGES = 200;
 
 export class SessionDO {
@@ -262,6 +263,22 @@ export class SessionDO {
       case "clearBotMessages": {
         await this.state.storage.delete(MESSAGES_KEY);
         return Response.json({ count: 0 });
+      }
+
+      // The /start guide is the one message /clearchat keeps, so it lives in
+      // its own key: a session reset must not lose it.
+      case "setGuideMessageId": {
+        const value = typeof body.value === "number" && body.value > 0 ? body.value : 0;
+        const existing = await this.state.storage.get<number>(GUIDE_KEY);
+        if (existing) return Response.json({ id: existing });
+        if (!value) return Response.json({ id: 0 });
+        await this.state.storage.put(GUIDE_KEY, value);
+        return Response.json({ id: value });
+      }
+
+      case "getGuideMessageId": {
+        const id = (await this.state.storage.get<number>(GUIDE_KEY)) ?? 0;
+        return Response.json({ id });
       }
 
       case "setLastAlert": {
