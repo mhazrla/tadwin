@@ -119,10 +119,17 @@ back to sending the link as text.
 ## Preview before /done
 
 `/done` no longer builds immediately. It shows a preview first: title, material length, audio/image
-counts, and block types. Buttons: **Send** (build), **Edit title**, **Edit material**, and a
-**Ringkas (AI)** / **Raw (tanpa AI)** toggle to switch between AI-formatted (summarized explanatory
-text, dalil/Arab preserved verbatim) and raw local parsing. AI failures fall back to the local parser
-and never drop dalil or Arabic text.
+counts, block types, and the first three formatted lines. Buttons: **Send** (build), **Edit title**,
+**Edit material**, and a **Ringkas (AI)** / **Raw (tanpa AI)** toggle to switch between AI-formatted
+(summarized explanatory text, dalil/Arab preserved verbatim) and raw local parsing.
+
+The preview header says which path actually produced the text: `[Ringkas (AI)]` when the model's
+output passed validation, `[Raw (tanpa AI)]` for the manual toggle, or
+`[Fallback (AI gagal: <reason>)]` when the AI call failed or its output was rejected (too short,
+Arabic altered, suspicious). A fallback never drops dalil or Arabic text; it is the local parser.
+
+AI connectivity can be checked with `GET /aistatus/<WEBHOOK_SECRET>`, which reports the base URL,
+model, key length, HTTP status, and latency.
 
 ## Navigation after a pick
 

@@ -246,6 +246,48 @@ export default {
       }
     }
 
+    if (url.pathname === `/aistatus/${secret}`) {
+      const started = Date.now();
+      const base = (env.AI_BASE_URL || "").replace(/\/+$/, "");
+      const info = {
+        base,
+        model: env.AI_MODEL,
+        keyLen: (env.AI_API_KEY || "").length,
+      };
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 30_000);
+        const resp = await fetch(`${base}/chat/completions`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${env.AI_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: env.AI_MODEL,
+            messages: [{ role: "user", content: "Reply with exactly: OK" }],
+            temperature: 0,
+          }),
+          signal: controller.signal,
+        });
+        clearTimeout(timer);
+        await resp.text();
+        return Response.json({
+          ...info,
+          ok: resp.ok,
+          status: resp.status,
+          ms: Date.now() - started,
+        });
+      } catch (error) {
+        return Response.json({
+          ...info,
+          ok: false,
+          error: String(error),
+          ms: Date.now() - started,
+        });
+      }
+    }
+
     if (url.pathname === "/") {
       return new Response("tadwin worker is ready");
     }
@@ -1398,6 +1440,28 @@ async function handleVideo(env: Env, chatId: number, media: TgMedia): Promise<vo
   await sendMessage(env, chatId, "Audio received. \u{1F3A7}");
 }
 
+function humanReason(reason?: string): string {
+  switch (reason) {
+    case "too_short":
+      return "output terlalu pendek";
+    case "arabic_dropped":
+      return "teks Arab berubah";
+    case "injected":
+      return "output mencurigakan";
+    case "ai_timeout":
+      return "timeout";
+    case "ai_parse":
+      return "output tidak valid";
+    case "ai_empty":
+      return "respons kosong";
+    case "ai_error":
+      return "koneksi gagal";
+    default:
+      if (reason && reason.startsWith("ai_http_")) return "HTTP " + reason.slice(8);
+      return reason || "tidak diketahui";
+  }
+}
+
 async function handlePreview(env: Env, chatId: number): Promise<void> {
   const session = await sessionCall(env, chatId, { op: "get" });
   if (!session.pageId) {
@@ -1427,12 +1491,13 @@ async function handlePreview(env: Env, chatId: number): Promise<void> {
       return;
     }
 
-    let blocks: Block[];
+    let formatted: { blocks: Block[]; source: "ai" | "fallback" | "raw"; reason?: string };
     if (mode === "raw") {
-      blocks = markdownToBlocks(material);
+      formatted = { blocks: markdownToBlocks(material), source: "raw" };
     } else {
-      blocks = await formatMaterial(env, material, title, references);
+      formatted = await formatMaterial(env, material, title, references);
     }
+    const blocks = formatted.blocks;
 
     await sessionCall(env, chatId, { op: "setPendingBlocks", items: blocks });
     await sessionCall(env, chatId, { op: "setAwaitingEdit", value: null });
@@ -1465,7 +1530,12 @@ async function handlePreview(env: Env, chatId: number): Promise<void> {
       .filter(Boolean)
       .join("\n");
 
-    const modeLabel = mode === "raw" ? "Raw (tanpa AI)" : "Ringkas (AI)";
+    const modeLabel =
+      formatted.source === "raw"
+        ? "Raw (tanpa AI)"
+        : formatted.source === "ai"
+          ? "Ringkas (AI)"
+          : "Fallback (AI gagal: " + humanReason(formatted.reason) + ")";
     const previewText =
       "Preview [" + modeLabel + "]\n" +
       `Title: ${title}\n` +
@@ -1550,7 +1620,7 @@ async function handleConfirmDone(env: Env, chatId: number): Promise<void> {
     if (Array.isArray(pending) && pending.length > 0) {
       blocks = pending as Block[];
     } else {
-      blocks = await formatMaterial(env, material, title, references);
+      blocks = (await formatMaterial(env, material, title, references)).blocks;
     }
 
     await setProgress("Uploading media...");
