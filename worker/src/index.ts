@@ -74,7 +74,7 @@ const HELP =
   "/skip  skip the title (auto-generate)\n" +
   "/status  show the current session\n" +
   "/cancel  clear the session\n" +
-  "/clearchat  clear this chat (keeps the /start guide)\n" +
+  "/clearchat  delete all bot messages in this chat\n" +
   "/done  preview and build the entry\n" +
   "/help  show this message";
 
@@ -88,7 +88,7 @@ const COMMANDS = [
   { command: "status", description: "Show the current session" },
   { command: "done", description: "Preview and build the entry" },
   { command: "cancel", description: "Clear the current session" },
-  { command: "clearchat", description: "Clear chat (keeps the /start guide)" },
+  { command: "clearchat", description: "Delete all bot messages in this chat" },
   { command: "help", description: "Show help" },
 ];
 
@@ -361,7 +361,7 @@ async function handleCommand(env: Env, chatId: number, text: string): Promise<vo
     case "/start":
     case "/help": {
       const ids = await sendMessage(env, chatId, "Welcome! \u{1F44B}\n\n" + HELP);
-      // The first /start guide is permanent: /clearchat never deletes it.
+      // Remember the /start guide id so it can be tracked like other bot messages.
       if (ids.length > 0) await setGuideMessageId(env, chatId, ids[0]);
       return;
     }
@@ -538,29 +538,9 @@ function buildListPage(
   };
 }
 
-const CLEAR_CHAT_COOLDOWN_MS = 30_000;
 const DONE_COOLDOWN_MS = 10_000;
 const MAX_MATERIAL_CHARS = 100_000;
 const MAX_TEXT_FILE_BYTES = 5 * 1024 * 1024;
-
-async function lastClearChat(env: Env, chatId: number): Promise<number> {
-  const stub = env.SESSIONS.get(env.SESSIONS.idFromName(`chat:${chatId}`));
-  const resp = await stub.fetch("https://do/", {
-    method: "POST",
-    body: JSON.stringify({ op: "getLastClearChat" }),
-  });
-  if (!resp.ok) return 0;
-  const data = (await resp.json()) as unknown;
-  return typeof data === "number" ? data : 0;
-}
-
-async function setLastClearChat(env: Env, chatId: number, value: number): Promise<void> {
-  const stub = env.SESSIONS.get(env.SESSIONS.idFromName(`chat:${chatId}`));
-  await stub.fetch("https://do/", {
-    method: "POST",
-    body: JSON.stringify({ op: "setLastClearChat", value }),
-  });
-}
 
 async function lastDone(env: Env, chatId: number): Promise<number> {
   const stub = env.SESSIONS.get(env.SESSIONS.idFromName(`chat:${chatId}`));
@@ -647,18 +627,6 @@ async function botMessages(env: Env, chatId: number): Promise<number[]> {
   return Array.isArray(data) ? data.filter((value): value is number => typeof value === "number") : [];
 }
 
-/** The /start guide message, kept across /clearchat and /cancel. */
-async function guideMessageId(env: Env, chatId: number): Promise<number> {
-  const stub = env.SESSIONS.get(env.SESSIONS.idFromName(`chat:${chatId}`));
-  const resp = await stub.fetch("https://do/", {
-    method: "POST",
-    body: JSON.stringify({ op: "getGuideMessageId" }),
-  });
-  if (!resp.ok) return 0;
-  const data = (await resp.json()) as { id?: number };
-  return typeof data?.id === "number" && data.id > 0 ? data.id : 0;
-}
-
 async function setGuideMessageId(env: Env, chatId: number, id: number): Promise<void> {
   try {
     const stub = env.SESSIONS.get(env.SESSIONS.idFromName(`chat:${chatId}`));
@@ -672,31 +640,15 @@ async function setGuideMessageId(env: Env, chatId: number, id: number): Promise<
 }
 
 /**
- * Delete the bot's own messages in this chat. Telegram only lets a bot delete
- * messages it sent, and only within 48 hours, so older ones are counted as
- * skipped rather than retried forever.
+ * Delete all tracked bot messages in this chat. Telegram only allows deleting
+ * messages the bot sent, and only within 48 hours; older ones are skipped.
  */
 async function handleClearChat(env: Env, chatId: number): Promise<void> {
-  const guide = await guideMessageId(env, chatId);
-  const stored = await botMessages(env, chatId);
-  const ids = guide > 0 ? stored.filter((id) => id !== guide) : stored;
+  const ids = await botMessages(env, chatId);
   if (ids.length === 0) {
-    await sendMessage(
-      env,
-      chatId,
-      guide > 0 ? "Nothing to clear. The /start guide stays." : "Nothing to clear in this chat.",
-    );
+    await sendMessage(env, chatId, "Nothing to clear in this chat.");
     return;
   }
-
-  const last = await lastClearChat(env, chatId);
-  const now = Date.now();
-  if (now - last < CLEAR_CHAT_COOLDOWN_MS) {
-    const wait = Math.ceil((CLEAR_CHAT_COOLDOWN_MS - (now - last)) / 1000);
-    await sendMessage(env, chatId, `Please wait ${wait} seconds before clearing again.`);
-    return;
-  }
-  await setLastClearChat(env, chatId, now);
 
   const started = Date.now();
   let deleted = 0;
@@ -705,7 +657,7 @@ async function handleClearChat(env: Env, chatId: number): Promise<void> {
 
   for (; index < ids.length; index++) {
     // ctx.waitUntil is about 30 s; stop early so the report still gets through.
-    if (Date.now() - started > 20000) break;
+    if (Date.now() - started > 25000) break;
     try {
       await deleteMessage(env, chatId, ids[index]);
       deleted++;
@@ -720,9 +672,8 @@ async function handleClearChat(env: Env, chatId: number): Promise<void> {
     await sessionCall(env, chatId, { op: "addBotMessages", items: remaining });
   }
 
-  const parts = [`Deleted ${deleted} message(s).`];
-  if (guide > 0) parts.push("The /start guide was kept.");
-  if (skipped > 0) parts.push(`${skipped} could not be deleted (older than 48 hours).`);
+  const parts = [`Deleted ${deleted} bot message(s).`];
+  if (skipped > 0) parts.push(`${skipped} could not be deleted (too old or already gone).`);
   if (remaining.length > 0) parts.push(`${remaining.length} left, send /clearchat again.`);
   await sendMessage(env, chatId, parts.join(" "));
 }
