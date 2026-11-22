@@ -242,6 +242,51 @@ interface MediaSink {
 /** Notion nests translations and sub-points inside quote blocks; do not lose them. */
 const MAX_DEPTH = 5;
 
+function escapeHtmlText(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function richTextPlain(items: unknown): string {
+  if (!Array.isArray(items)) return "";
+  return items.map((item) => String((item as Json)?.plain_text ?? ((item as Json)?.text as Json | undefined)?.content ?? "")).join("");
+}
+
+async function renderTable(env: Env, block: Json, children: Json[]): Promise<string> {
+  let rows = children.filter((c) => c.type === "table_row");
+  if (!rows.length && block.has_children) {
+    rows = (await getChildren(env, block.id as string)).filter((c) => c.type === "table_row");
+  }
+  if (!rows.length) return "[table]";
+
+  const matrix = rows.map((row) => {
+    const obj = (row.table_row as Json | undefined) ?? {};
+    const cells = Array.isArray(obj.cells) ? (obj.cells as unknown[]) : [];
+    return cells.map((cell) => richTextPlain(cell).replace(/\s+/g, " ").trim());
+  });
+
+  const colCount = Math.max(0, ...matrix.map((r) => r.length));
+  if (colCount === 0) return "[table]";
+
+  const widths = Array.from({ length: colCount }, (_, i) =>
+    Math.min(24, Math.max(3, ...matrix.map((r) => (r[i] ?? "").length))),
+  );
+
+  const fmt = (row: string[]) =>
+    "| " + widths.map((w, i) => {
+      const cell = row[i] ?? "";
+      const trimmed = cell.length > w ? cell.slice(0, w - 1) + "…" : cell;
+      return trimmed.padEnd(w, " ");
+    }).join(" | ") + " |";
+
+  const sep = "|-" + widths.map((w) => "-".repeat(w)).join("-|-") + "-|";
+  const lines = matrix.map((row, idx) => (idx === 1 ? [sep, fmt(row)] : [fmt(row)])).flat();
+  // If table has header and we didn't insert sep (single row or already inserted), ensure sep after first row.
+  if (matrix.length > 1 && !lines.includes(sep)) {
+    lines.splice(1, 0, sep);
+  }
+  return `<pre>${escapeHtmlText(lines.join("\n"))}</pre>`;
+}
+
 async function renderBlocks(
   env: Env,
   blocks: Json[],
@@ -314,6 +359,20 @@ async function blockLines(
     return inQuote ? lines : [`<blockquote>${lines.join("\n")}</blockquote>`];
   }
 
+  if (type === "table") {
+    return [await renderTable(env, block, children)];
+  }
+
+  if (type === "column_list" || type === "column") {
+    if (!children.length) return [];
+    return renderBlocks(env, children, depth + 1, media, inQuote);
+  }
+
+  if (type === "equation") {
+    const expr = String(obj.expression ?? "").trim();
+    return expr ? [`<pre>${escapeHtmlText(expr)}</pre>`] : [];
+  }
+
   const inner = richTextToHtml(obj.rich_text);
   const lines: string[] = [];
 
@@ -324,10 +383,32 @@ async function blockLines(
       lines.push(`• ${inner}`);
     } else if (type === "numbered_list_item") {
       lines.push(`${number}. ${inner}`);
+    } else if (type === "to_do") {
+      const checked = obj.checked ? "☑" : "☐";
+      lines.push(`${checked} ${inner}`);
+    } else if (type === "callout") {
+      const icon = (obj.icon as Json | undefined)?.emoji;
+      lines.push(icon ? `${String(icon)} ${inner}` : inner);
     } else if (type === "code") {
-      lines.push(`<pre>${inner}</pre>`);
+      const lang = String(obj.language ?? "").toLowerCase();
+      // Mermaid is chart source; Telegram can't render it, so show labeled code.
+      if (lang === "mermaid") {
+        lines.push(`<b>Mermaid chart</b>\n<pre>${escapeHtmlText(richTextPlain(obj.rich_text))}</pre>`);
+      } else {
+        lines.push(`<pre>${escapeHtmlText(richTextPlain(obj.rich_text))}</pre>`);
+      }
+    } else if (type === "toggle") {
+      lines.push(`▸ ${inner}`);
     } else {
       lines.push(inner);
+    }
+  } else if (type === "code") {
+    const codeText = richTextPlain(obj.rich_text);
+    if (codeText.trim()) {
+      const lang = String(obj.language ?? "").toLowerCase();
+      lines.push(lang === "mermaid"
+        ? `<b>Mermaid chart</b>\n<pre>${escapeHtmlText(codeText)}</pre>`
+        : `<pre>${escapeHtmlText(codeText)}</pre>`);
     }
   }
 
