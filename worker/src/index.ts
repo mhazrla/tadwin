@@ -49,6 +49,8 @@ function isAdmin(env: Env, chatId: number): boolean {
 const READ_ONLY_MSG =
   "Read-only mode: you can browse and read, but not add or edit entries. " +
   "Ask the bot owner for write access.";
+
+const NEED_ADD_MSG = "Send /add first before sending material, files, or links.";
 const URL_RE = /https?:\/\/(?:www\.)?(?:app\.)?notion\.(?:so|com)\/\S+/i;
 const DEFAULT_HOME_PAGE_ID = "2823c08b-b705-8081-968a-daeb8dcc4b33";
 const DEFAULT_HOME_PAGE_URL = "https://www.notion.so/2823c08bb7058081968adaeb8dcc4b33";
@@ -403,6 +405,7 @@ async function handleCommand(env: Env, chatId: number, text: string): Promise<vo
         await sendMessage(env, chatId, READ_ONLY_MSG);
         return;
       }
+      await sessionCall(env, chatId, { op: "setAddActive", value: true });
       const value = text.replace(/^\/(?:add|tambah)(@\w+)?\s*/i, "").trim();
       if (value) {
         await sessionCall(env, chatId, { op: "setTitle", title: value });
@@ -1281,11 +1284,6 @@ async function handleText(env: Env, chatId: number, msg: TgMessage): Promise<voi
     return;
   }
 
-  if (!isAdmin(env, chatId) && !raw.match(URL_RE)) {
-    await sendMessage(env, chatId, READ_ONLY_MSG);
-    return;
-  }
-
   if (session.awaitingEdit === "title") {
     await sessionCall(env, chatId, { op: "setTitle", title: text });
     await sessionCall(env, chatId, { op: "setAwaitingEdit", value: null });
@@ -1302,11 +1300,30 @@ async function handleText(env: Env, chatId: number, msg: TgMessage): Promise<voi
     return;
   }
 
-  const match = raw.match(URL_RE);
-  if (match) {
+  const pageLink = raw.match(URL_RE);
+
+  if (!session.addActive) {
+    // Notion page link is page setup, allowed anytime. Everything else needs /add.
+    if (pageLink) {
+      // fall through to page-link handling below
+    } else if (!isAdmin(env, chatId)) {
+      await sendMessage(env, chatId, READ_ONLY_MSG);
+      return;
+    } else {
+      await sendMessage(env, chatId, NEED_ADD_MSG);
+      return;
+    }
+  }
+
+  if (!isAdmin(env, chatId) && !pageLink) {
+    await sendMessage(env, chatId, READ_ONLY_MSG);
+    return;
+  }
+
+  if (pageLink) {
     try {
-      const pageId = parsePageId(match[0]);
-      await sessionCall(env, chatId, { op: "setPage", pageId, pageUrl: match[0] });
+      const pageId = parsePageId(pageLink[0]);
+      await sessionCall(env, chatId, { op: "setPage", pageId, pageUrl: pageLink[0] });
     } catch {
       await sendMessage(env, chatId, "That Notion link is not valid.");
       return;
@@ -1331,6 +1348,11 @@ async function handleText(env: Env, chatId: number, msg: TgMessage): Promise<voi
 async function handleDocument(env: Env, chatId: number, msg: TgMessage): Promise<void> {
   if (!isAdmin(env, chatId)) {
     await sendMessage(env, chatId, READ_ONLY_MSG);
+    return;
+  }
+  const sess0 = await sessionCall(env, chatId, { op: "get" });
+  if (!sess0.addActive) {
+    await sendMessage(env, chatId, NEED_ADD_MSG);
     return;
   }
   const doc = msg.document!;
@@ -1425,6 +1447,11 @@ async function handlePhoto(env: Env, chatId: number, msg: TgMessage): Promise<vo
     await sendMessage(env, chatId, READ_ONLY_MSG);
     return;
   }
+  const session = await sessionCall(env, chatId, { op: "get" });
+  if (!session.addActive) {
+    await sendMessage(env, chatId, NEED_ADD_MSG);
+    return;
+  }
   const photo = msg.photo![msg.photo!.length - 1];
   await sessionCall(env, chatId, {
     op: "push",
@@ -1447,6 +1474,11 @@ async function handleAudio(
 ): Promise<void> {
   if (!isAdmin(env, chatId)) {
     await sendMessage(env, chatId, READ_ONLY_MSG);
+    return;
+  }
+  const session = await sessionCall(env, chatId, { op: "get" });
+  if (!session.addActive) {
+    await sendMessage(env, chatId, NEED_ADD_MSG);
     return;
   }
   const rawMime = media.mime_type ?? "";
@@ -1472,6 +1504,11 @@ async function handleAudio(
 async function handleVideo(env: Env, chatId: number, media: TgMedia): Promise<void> {
   if (!isAdmin(env, chatId)) {
     await sendMessage(env, chatId, READ_ONLY_MSG);
+    return;
+  }
+  const session = await sessionCall(env, chatId, { op: "get" });
+  if (!session.addActive) {
+    await sendMessage(env, chatId, NEED_ADD_MSG);
     return;
   }
   const rawMime = media.mime_type ?? "video/mp4";

@@ -42,6 +42,7 @@ export interface SessionState {
   pendingBlocks: unknown[];
   awaitingEdit: "title" | "material" | null;
   awaitingTitle: boolean;
+  addActive: boolean;
   summaryMode: "ai" | "raw";
 }
 
@@ -64,6 +65,7 @@ export function emptyState(): SessionState {
     pendingBlocks: [],
     awaitingEdit: null,
     awaitingTitle: false,
+    addActive: false,
     summaryMode: "ai",
   };
 }
@@ -193,6 +195,13 @@ export class SessionDO {
       case "setAwaitingTitle": {
         const value = Boolean(body.value);
         const next: SessionState = { ...current, awaitingTitle: value };
+        await this.state.storage.put("session", next);
+        return Response.json(next);
+      }
+
+      case "setAddActive": {
+        const value = Boolean(body.value);
+        const next: SessionState = { ...current, addActive: value };
         await this.state.storage.put("session", next);
         return Response.json(next);
       }
