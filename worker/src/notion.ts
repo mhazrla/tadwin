@@ -68,32 +68,79 @@ export async function getChildren(env: Env, blockId: string): Promise<Json[]> {
   return out;
 }
 
-/** Collect existing toggle-heading entries as formatting references. */
-export async function findToggleExamples(
+const TYPE_TAG: Record<string, string> = {
+  heading_1: "h1",
+  heading_2: "h2",
+  heading_3: "h3",
+  paragraph: "para",
+  quote: "quote",
+  bulleted_list_item: "bullet",
+  numbered_list_item: "num",
+  code: "code",
+  divider: "divider",
+  callout: "callout",
+};
+
+/** One block per line, tagged with its type, so the model can copy the shape. */
+async function typedLines(
+  env: Env,
+  blocks: Json[],
+  depth: number,
+  out: string[],
+): Promise<void> {
+  let seen = 0;
+  for (const block of blocks) {
+    if (seen++ > 40 || out.join("\n").length > 700) return;
+    const type = block.type as string | undefined;
+    if (!type || type === "child_page") continue;
+    if (type === "divider") {
+      out.push("[divider]");
+      continue;
+    }
+    const text = plain(block).trim().replace(/\s+/g, " ");
+    if (text) out.push(`[${TYPE_TAG[type] ?? type}] ${text.slice(0, 160)}`);
+    const recurse = ["quote", "callout", "toggle"].includes(type) || type.startsWith("heading");
+    if (block.has_children && recurse && depth < 1) {
+      await typedLines(env, await getChildren(env, block.id as string), depth + 1, out);
+    }
+  }
+}
+
+/**
+ * Real entries from this page, rendered as typed skeletons. Toggle headings are
+ * the usual entry shape; a page that stores entries as child pages is sampled
+ * the same way, so the model always has the page's own house style.
+ */
+export async function collectFormatExamples(
   env: Env,
   pageId: string,
-  maxExamples = 3,
+  max = 3,
 ): Promise<string[]> {
+  const children = await getChildren(env, pageId);
   const examples: string[] = [];
-  for (const block of await getChildren(env, pageId)) {
-    if (examples.length >= maxExamples) break;
+
+  for (const block of children) {
+    if (examples.length >= max) break;
     const type = block.type as string | undefined;
     if (!type || !["heading_1", "heading_2", "heading_3"].includes(type)) continue;
     const obj = block[type] as Json | undefined;
     if (!obj?.is_toggleable) continue;
 
-    const lines = [`### ${plain(block)}`];
+    const lines = [`[${TYPE_TAG[type]}] ${plain(block).trim()}`];
     if (block.has_children) {
-      for (const child of await getChildren(env, block.id as string)) {
-        if (child.type === "divider") {
-          lines.push("---");
-          continue;
-        }
-        const text = plain(child);
-        if (text) lines.push(text);
-      }
+      await typedLines(env, await getChildren(env, block.id as string), 0, lines);
     }
-    examples.push(lines.join("\n"));
+    if (lines.length > 1) examples.push(lines.join("\n"));
+  }
+  if (examples.length) return examples;
+
+  for (const block of children) {
+    if (examples.length >= max) break;
+    if (block.type !== "child_page") continue;
+    const title = ((block.child_page as Json)?.title as string) ?? "Untitled";
+    const lines = [`[page] ${title}`];
+    await typedLines(env, await getChildren(env, block.id as string), 0, lines);
+    if (lines.length > 1) examples.push(lines.join("\n"));
   }
   return examples;
 }

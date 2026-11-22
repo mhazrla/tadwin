@@ -158,7 +158,15 @@ export async function editMessageText(
     disable_web_page_preview: true,
   };
   if (buttons) payload.reply_markup = { inline_keyboard: buttons };
-  await tg(env, "editMessageText", payload);
+  try {
+    await tg(env, "editMessageText", payload);
+  } catch (error) {
+    // Tapping the same button twice sends an identical payload; Telegram
+    // rejects it as "message is not modified". The message already shows the
+    // wanted content, so treat that as success rather than sending a new one.
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/message is not modified/i.test(message)) throw error;
+  }
 }
 
 /** Remove a message entirely (used to clean up the section list after a pick). */

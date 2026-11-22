@@ -11,7 +11,7 @@ import {
 } from "./format";
 import {
   appendEntry,
-  findToggleExamples,
+  collectFormatExamples,
   getSectionContent,
   listPageContent,
   uploadFile,
@@ -1158,9 +1158,17 @@ async function renderList(
     return;
   }
 
-  await sessionCall(env, chatId, { op: "setListState", kind, page });
+  const pages = Math.max(1, Math.ceil(items.length / BUTTONS_PER_PAGE));
+  const target = Math.min(Math.max(0, Math.trunc(page) || 0), pages - 1);
 
-  const built = buildListPage(items, page, kind, switchFor(kind, otherCount), flags);
+  // A double-tapped Next (or Telegram re-delivering the same callback) asks for
+  // the page that is already on screen. Re-editing it would be a no-op, so stop
+  // here instead of falling through to a fresh bubble for every extra tap.
+  if (messageId && session.listKind === kind && session.listPage === target) return;
+
+  await sessionCall(env, chatId, { op: "setListState", kind, page: target });
+
+  const built = buildListPage(items, target, kind, switchFor(kind, otherCount), flags);
   if (!messageId) {
     await sendKeyboardMessage(env, chatId, built.text, built.keyboard);
     return;
@@ -1524,16 +1532,9 @@ async function handlePreview(env: Env, chatId: number): Promise<void> {
   await sendMessage(env, chatId, "Preparing preview...");
 
   try {
-    const references = await findToggleExamples(env, session.pageId);
-    if (references.length === 0) {
-      await sendMessage(
-        env,
-        chatId,
-        "This page has no example entry (toggle heading) yet. " +
-          "Add one so the format can be copied, then run /done again.",
-      );
-      return;
-    }
+    // Format reference is optional: an empty page just means the model uses its
+    // default block shape instead of blocking the whole entry.
+    const references = await collectFormatExamples(env, session.pageId);
 
     let formatted: { blocks: Block[]; source: "ai" | "fallback" | "raw"; reason?: string };
     if (mode === "raw") {
@@ -1566,10 +1567,10 @@ async function handlePreview(env: Env, chatId: number): Promise<void> {
       return arr.map((r) => String((r.text as Record<string, unknown> | undefined)?.content ?? "")).join("");
     }
     const snippet = blocks
-      .slice(0, 3)
+      .slice(0, 6)
       .map((b, i) => {
         const t = blockText(b as Record<string, unknown>).trim();
-        return t ? `${i + 1}. ${t.slice(0, 120)}${t.length > 120 ? "…" : ""}` : "";
+        return t ? `${i + 1}. ${t.slice(0, 140)}${t.length > 140 ? "…" : ""}` : "";
       })
       .filter(Boolean)
       .join("\n");
@@ -1585,7 +1586,8 @@ async function handlePreview(env: Env, chatId: number): Promise<void> {
       `Title: ${title}\n` +
       `Material: ${material.length} chars\n` +
       `Audio: ${audioCount}  Image: ${imageCount}\n` +
-      `Blocks: ${blocks.length} (${summary})\n\n` +
+      `Blocks: ${blocks.length} (${summary})\n` +
+      `Format ref: ${references.length} example(s)\n\n` +
       (snippet ? `${snippet}` : "");
 
     const toggleBtn =
@@ -1646,17 +1648,7 @@ async function handleConfirmDone(env: Env, chatId: number): Promise<void> {
   }
 
   try {
-    const references = await findToggleExamples(env, session.pageId);
-    if (references.length === 0) {
-      await setProgress("No example entry found.");
-      await sendMessage(
-        env,
-        chatId,
-        "This page has no example entry (toggle heading) yet. " +
-          "Add one so the format can be copied, then run /done again.",
-      );
-      return;
-    }
+    const references = await collectFormatExamples(env, session.pageId);
 
     await setProgress("Formatting material...");
     let blocks: Block[];
