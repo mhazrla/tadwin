@@ -514,11 +514,13 @@ function buildListPage(
 
   const nav: InlineButton[] = [];
   if (safePage > 0) {
+    nav.push({ text: "««", callback_data: `${cfg.pagePrefix}0` });
     nav.push({ text: "◀ Prev", callback_data: `${cfg.pagePrefix}${safePage - 1}` });
   }
   nav.push({ text: `${safePage + 1}/${pages}`, callback_data: "cur" });
   if (safePage < pages - 1) {
     nav.push({ text: "Next ▶", callback_data: `${cfg.pagePrefix}${safePage + 1}` });
+    nav.push({ text: "»»", callback_data: `${cfg.pagePrefix}${pages - 1}` });
   }
   keyboard.push(nav);
 
