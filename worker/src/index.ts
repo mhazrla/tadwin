@@ -452,6 +452,11 @@ async function handleCommand(env: Env, chatId: number, text: string): Promise<vo
         await sendMessage(env, chatId, READ_ONLY_MSG);
         return;
       }
+      const session = await sessionCall(env, chatId, { op: "get" });
+      if (!session.addActive) {
+        await sendMessage(env, chatId, "Send /add first before using /done.");
+        return;
+      }
       await handlePreview(env, chatId);
       return;
     }
@@ -1018,6 +1023,11 @@ async function handleCallback(env: Env, query: TgCallbackQuery): Promise<void> {
   }
 
   if (data === "confirm:done") {
+    const session = await sessionCall(env, chatId, { op: "get" });
+    if (!session.addActive) {
+      await answerCallbackQuery(env, query.id, "Send /add first.");
+      return;
+    }
     if (query.message?.message_id) {
       try { await deleteMessage(env, chatId, query.message.message_id); } catch (error) { console.error("delete list failed", messageOf(error)); }
     }
