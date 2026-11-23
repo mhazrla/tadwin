@@ -78,6 +78,9 @@ function arabicSequences(text: string): string[] {
   return text.match(ARABIC_RE) ?? [];
 }
 
+const stripHarakat = (text: string): string =>
+  text.replace(/[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06DC\u06DF-\u06E4\u06E7-\u06E8\u06EA-\u06ED]/g, "");
+
 const squash = (text: string): string =>
   text.normalize("NFC").replace(/\u0640/g, "").replace(/\s+/g, "");
 
@@ -96,12 +99,27 @@ function allArabicPreserved(input: string, output: string): { ok: boolean; missi
   }
   if (missing === 0) return { ok: true, missing: 0, total: seqs.length };
   const ratio = missing / seqs.length;
-  // Allow tiny normalization drift, but never drop a meaningful chunk of Arabic.
   if (ratio <= 0.2 && missing <= 8) {
     console.warn("AI altered minor Arabic fragments; allowing", { missing, total: seqs.length });
     return { ok: true, missing, total: seqs.length };
   }
-  return { ok: false, missing, total: seqs.length };
+
+  // Second pass: ignore harakat differences (model sometimes normalizes them).
+  const flatNoH = stripHarakat(flat);
+  let missingNoH = 0;
+  for (const seq of seqs) {
+    if (!flatNoH.includes(stripHarakat(seq))) missingNoH++;
+  }
+  if (missingNoH === 0) {
+    console.warn("AI changed only harakat; allowing", { missing, total: seqs.length });
+    return { ok: true, missing, total: seqs.length };
+  }
+  const ratioNoH = missingNoH / seqs.length;
+  if (ratioNoH <= 0.2 && missingNoH <= 8) {
+    console.warn("AI altered minor Arabic fragments ignoring harakat; allowing", { missing: missingNoH, total: seqs.length });
+    return { ok: true, missing: missingNoH, total: seqs.length };
+  }
+  return { ok: false, missing: missingNoH, total: seqs.length };
 }
 
 const RETRY_NOTE =
