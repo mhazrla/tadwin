@@ -302,14 +302,55 @@ function renderTableText(matrix: string[][]): string {
   return `<pre>${escapeHtmlText(lines.join("\n"))}</pre>`;
 }
 
-function renderTableSalt(matrix: string[][]): string {
+function renderTableDot(matrix: string[][]): string {
   const colCount = Math.max(0, ...matrix.map((r) => r.length));
-  if (colCount === 0) return "@startsalt\n{#\n| empty |\n}\n@endsalt";
-  const esc = (s: string) => s.replace(/[|{}<>]/g, " ").replace(/\n/g, " ").slice(0, 60);
-  const lines = matrix.map((row) =>
-    "| " + Array.from({ length: colCount }, (_, i) => esc(row[i] ?? "")).join(" | ") + " |",
-  );
-  return "@startsalt\n{#\n" + lines.join("\n") + "\n}\n@endsalt";
+  if (colCount === 0) return 'digraph T { node [shape=plaintext]; T [label="empty"]; }';
+
+  const esc = (s: string) =>
+    s
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+
+  const wrap = (s: string, max = 28): string => {
+    const text = s.trim();
+    if (!text) return " ";
+    const words = text.split(/\s+/);
+    const lines: string[] = [];
+    let cur = "";
+    for (const w of words) {
+      const next = cur ? cur + " " + w : w;
+      if (next.length > max && cur) {
+        lines.push(esc(cur));
+        cur = w;
+      } else {
+        cur = next;
+      }
+    }
+    if (cur) lines.push(esc(cur));
+    return lines.join("<BR/>");
+  };
+
+  const rows = matrix
+    .map((row, ri) => {
+      const cells = Array.from({ length: colCount }, (_, i) => {
+        const val = wrap(row[i] ?? "");
+        return ri === 0 ? `<TD><B>${val}</B></TD>` : `<TD>${val}</TD>`;
+      }).join("");
+      return `<TR>${cells}</TR>`;
+    })
+    .join("\n      ");
+
+  return `digraph T {
+  graph [bgcolor="white" pad="0.2"];
+  node [shape=plaintext fontname="Helvetica"];
+  T [label=<
+    <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6" BGCOLOR="white">
+      ${rows}
+    </TABLE>
+  >];
+}`;
 }
 
 async function renderBlocks(
@@ -388,8 +429,8 @@ async function blockLines(
     const matrix = await getTableMatrix(env, block, children);
     if (matrix.length === 0) return ["[table]"];
     try {
-      const png = await krokiPng("plantuml", renderTableSalt(matrix));
-      media.images.push({ bytes: png, name: "table.png", caption: "Table" });
+      const png = await krokiPng("graphviz", renderTableDot(matrix));
+      media.images.push({ bytes: png, name: "table.png", caption: "" });
       return [];
     } catch (error) {
       console.error("table render failed", error);
