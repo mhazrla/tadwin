@@ -242,22 +242,6 @@ export default {
       }
     }
 
-    if (url.pathname === `/models/${secret}`) {
-      const base = env.AI_BASE_URL.replace(/\/+$/, "");
-      try {
-        const resp = await fetch(`${base}/models`, {
-          headers: { Authorization: `Bearer ${env.AI_API_KEY}` },
-        });
-        const body = await resp.text();
-        return new Response(body, {
-          status: resp.status,
-          headers: { "Content-Type": "application/json" },
-        });
-      } catch (error) {
-        return Response.json({ error: String(error) }, { status: 500 });
-      }
-    }
-
     if (url.pathname === `/aistatus/${secret}`) {
       const started = Date.now();
       const base = (env.AI_BASE_URL || "").replace(/\/+$/, "");
