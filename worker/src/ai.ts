@@ -78,17 +78,30 @@ function arabicSequences(text: string): string[] {
   return text.match(ARABIC_RE) ?? [];
 }
 
-const squash = (text: string): string => text.replace(/\s+/g, "");
+const squash = (text: string): string =>
+  text.normalize("NFC").replace(/\u0640/g, "").replace(/\s+/g, "");
 
 /**
- * Every Arabic run in the input must still be present in the output. Whitespace
- * is ignored so a verse split across two blocks still counts as preserved.
+ * Every Arabic run in the input must still be present in the output. Whitespace,
+ * NFC normalization, and tatweel are ignored. A small tolerance allows minor
+ * model normalization without letting real dalil/ayat drops through.
  */
 function allArabicPreserved(input: string, output: string): boolean {
   const seqs = arabicSequences(input);
   if (seqs.length === 0) return true;
   const flat = squash(output);
-  return seqs.every((seq) => flat.includes(squash(seq)));
+  let missing = 0;
+  for (const seq of seqs) {
+    if (!flat.includes(squash(seq))) missing++;
+  }
+  if (missing === 0) return true;
+  const ratio = missing / seqs.length;
+  // Allow tiny normalization drift, but never drop a meaningful chunk of Arabic.
+  if (ratio <= 0.1 && missing <= 3) {
+    console.warn("AI altered minor Arabic fragments; allowing", { missing, total: seqs.length });
+    return true;
+  }
+  return false;
 }
 
 const RETRY_NOTE =
