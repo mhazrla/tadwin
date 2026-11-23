@@ -5,6 +5,8 @@ export interface Env {
   AI_BASE_URL: string;
   AI_API_KEY: string;
   AI_MODEL: string;
+  /** Optional: model used when AI_MODEL is unavailable (overload/5xx). */
+  AI_FALLBACK_MODEL?: string;
   WEBHOOK_SECRET: string;
   /** Optional: comma-separated list of allowed chat_ids. */
   ALLOWED_CHAT_IDS?: string;

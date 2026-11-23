@@ -1553,7 +1553,12 @@ function humanReason(reason?: string): string {
       return "koneksi gagal";
     default:
       if (reason && reason.startsWith("arabic_dropped:")) return "teks Arab berubah (" + reason.slice(15) + ")";
-      if (reason && reason.startsWith("ai_http_")) return "HTTP " + reason.slice(8);
+      if (reason && reason.startsWith("ai_http_")) {
+        const status = reason.slice(8);
+        if (status === "429") return "batas permintaan AI (429)";
+        if (status.startsWith("5")) return "server AI sibuk (" + status + ")";
+        return "HTTP " + status;
+      }
       return reason || "tidak diketahui";
   }
 }

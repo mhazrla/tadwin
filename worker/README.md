@@ -76,6 +76,12 @@ AI mode extracts key points and mirrors existing section format on the page; dal
 (including harakat) are preserved verbatim. Header shows `[Ringkas (AI)]`, `[Raw (tanpa AI)]`, or
 `[Fallback (AI gagal: ...)]`. Check AI with `GET /aistatus/<WEBHOOK_SECRET>`.
 
+The AI call retries transient upstream failures (`429`, `5xx`, timeout) with backoff and, if the
+primary model keeps failing, switches to `AI_FALLBACK_MODEL` (default `gemini-3.5-flash`). Gemini
+frequently returns `503 high demand` for a single model while another is healthy, so the fallback
+is what keeps `/done` from dropping to raw text. Total AI time is capped (~24 s) to stay inside
+Telegram's webhook window.
+
 ## Clearing the chat
 
 `/clearchat` (alias `/bersihkan`) deletes tracked bot messages in this chat. Telegram only allows a
@@ -115,6 +121,7 @@ npx wrangler secret put NOTION_TOKEN
 npx wrangler secret put AI_API_KEY
 npx wrangler secret put AI_BASE_URL      # https://generativelanguage.googleapis.com/v1beta/openai
 npx wrangler secret put AI_MODEL         # see "Choosing a model"
+npx wrangler secret put AI_FALLBACK_MODEL # optional; used when AI_MODEL is overloaded (503)
 npx wrangler secret put WEBHOOK_SECRET   # any random string
 ```
 
