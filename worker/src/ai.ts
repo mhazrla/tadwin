@@ -24,8 +24,8 @@ Key points (REQUIRED):
 - The output is a study summary, not a transcript. Extract the key points: rulings, definitions,
   conditions, steps, and the dalil that supports them.
 - One key point per block; merge overlapping points; keep the original order of ideas.
-- Drop narration, personal stories, repetition, and filler. Aim for 40-60% of the source length
-  for non-dalil text.
+- Drop narration, personal stories, repetition, and filler. Keep non-dalil text concise while
+  preserving every key point.
 - Never add content or opinions that are not in the source.
 
 Content preservation (CRITICAL - do not violate):
@@ -149,7 +149,9 @@ function judge(
   }
 
   const outputLen = totalTextLength(items);
-  if (inputLen > 0 && outputLen < inputLen * 0.3) {
+  // Key-point extraction can be legitimately compact, but a near-empty/truncated
+  // output means the model dropped content. Only apply on non-trivial inputs.
+  if (inputLen > 200 && outputLen < inputLen * 0.2) {
     console.error("AI output too short (", outputLen, "vs", inputLen, "); falling back to local parser");
     return { ok: false, reason: "too_short" };
   }
