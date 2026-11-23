@@ -325,6 +325,10 @@ async function handleUpdate(env: Env, update: TgUpdate): Promise<void> {
   if (!(await chatAllowed(env, chatId))) return;
 
   const text = typeof msg.text === "string" ? msg.text.trim() : "";
+  const cmd = text.startsWith("/") ? text.split(/\s+/)[0].split("@")[0].toLowerCase() : "";
+  if (cmd !== "/clearchat" && cmd !== "/bersihkan") {
+    await clearTrackedBotMessages(env, chatId);
+  }
   if (text.startsWith("/")) {
     await handleCommand(env, chatId, text);
     return;
@@ -996,6 +1000,7 @@ async function handleCallback(env: Env, query: TgCallbackQuery): Promise<void> {
     await answerCallbackQuery(env, query.id);
     return;
   }
+  await clearTrackedBotMessages(env, chatId);
 
   const data = query.data ?? "";
 
@@ -1182,9 +1187,6 @@ async function retrieveSection(
       console.error("delete list failed", messageOf(error));
     }
   }
-
-  // Keep the chat focused on the material being opened.
-  await clearTrackedBotMessages(env, chatId);
 
   await sendMessage(env, chatId, `Reading: ${section.title}`);
 
