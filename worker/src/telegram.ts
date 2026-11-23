@@ -228,6 +228,30 @@ export async function sendPhotoBytes(
   return data.result?.message_id;
 }
 
+/** Send a file from raw bytes (fallback for images Telegram won't accept as photos). */
+export async function sendDocumentBytes(
+  env: Env,
+  chatId: number,
+  bytes: ArrayBuffer,
+  name: string,
+  caption?: string,
+): Promise<number | undefined> {
+  const form = new FormData();
+  form.append("chat_id", String(chatId));
+  form.append("document", new Blob([bytes], { type: "image/png" }), name);
+  if (caption) {
+    form.append("caption", caption.slice(0, 1024));
+    form.append("parse_mode", "HTML");
+  }
+  const resp = await fetch(
+    `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendDocument`,
+    { method: "POST", body: form },
+  );
+  const data = (await resp.json()) as TgResponse<{ message_id: number }>;
+  if (!data.ok) throw new Error(`Telegram sendDocument: ${data.description ?? resp.status}`);
+  return data.result?.message_id;
+}
+
 /** Send an audio file straight from a URL; Telegram fetches it itself. */
 export async function sendAudio(
   env: Env,
