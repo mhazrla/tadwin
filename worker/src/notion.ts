@@ -209,10 +209,17 @@ export async function listPageContent(
   return { sections, pages };
 }
 
+export interface SectionImage {
+  url?: string | null;
+  bytes?: ArrayBuffer;
+  name?: string;
+  caption: string;
+}
+
 export interface SectionContent {
   html: string[];
   audios: Array<{ url: string | null; caption: string }>;
-  images: Array<{ url: string | null; caption: string }>;
+  images: SectionImage[];
 }
 
 function fileUrl(obj: Json | undefined): string | null {
@@ -251,40 +258,58 @@ function richTextPlain(items: unknown): string {
   return items.map((item) => String((item as Json)?.plain_text ?? ((item as Json)?.text as Json | undefined)?.content ?? "")).join("");
 }
 
-async function renderTable(env: Env, block: Json, children: Json[]): Promise<string> {
+async function krokiPng(type: string, source: string): Promise<ArrayBuffer> {
+  const resp = await fetch(`https://kroki.io/${type}/png`, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain" },
+    body: source,
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => "");
+    throw new Error(`Kroki ${type} error ${resp.status}: ${body.slice(0, 200)}`);
+  }
+  return await resp.arrayBuffer();
+}
+
+async function getTableMatrix(env: Env, block: Json, children: Json[]): Promise<string[][]> {
   let rows = children.filter((c) => c.type === "table_row");
   if (!rows.length && block.has_children) {
     rows = (await getChildren(env, block.id as string)).filter((c) => c.type === "table_row");
   }
-  if (!rows.length) return "[table]";
-
-  const matrix = rows.map((row) => {
+  return rows.map((row) => {
     const obj = (row.table_row as Json | undefined) ?? {};
     const cells = Array.isArray(obj.cells) ? (obj.cells as unknown[]) : [];
     return cells.map((cell) => richTextPlain(cell).replace(/\s+/g, " ").trim());
   });
+}
 
+function renderTableText(matrix: string[][]): string {
   const colCount = Math.max(0, ...matrix.map((r) => r.length));
   if (colCount === 0) return "[table]";
-
   const widths = Array.from({ length: colCount }, (_, i) =>
     Math.min(24, Math.max(3, ...matrix.map((r) => (r[i] ?? "").length))),
   );
-
   const fmt = (row: string[]) =>
     "| " + widths.map((w, i) => {
       const cell = row[i] ?? "";
       const trimmed = cell.length > w ? cell.slice(0, w - 1) + "…" : cell;
       return trimmed.padEnd(w, " ");
     }).join(" | ") + " |";
-
   const sep = "|-" + widths.map((w) => "-".repeat(w)).join("-|-") + "-|";
   const lines = matrix.map((row, idx) => (idx === 1 ? [sep, fmt(row)] : [fmt(row)])).flat();
-  // If table has header and we didn't insert sep (single row or already inserted), ensure sep after first row.
-  if (matrix.length > 1 && !lines.includes(sep)) {
-    lines.splice(1, 0, sep);
-  }
+  if (matrix.length > 1 && !lines.includes(sep)) lines.splice(1, 0, sep);
   return `<pre>${escapeHtmlText(lines.join("\n"))}</pre>`;
+}
+
+function renderTableSalt(matrix: string[][]): string {
+  const colCount = Math.max(0, ...matrix.map((r) => r.length));
+  if (colCount === 0) return "@startsalt\n{#\n| empty |\n}\n@endsalt";
+  const esc = (s: string) => s.replace(/[|{}<>]/g, " ").replace(/\n/g, " ").slice(0, 60);
+  const lines = matrix.map((row) =>
+    "| " + Array.from({ length: colCount }, (_, i) => esc(row[i] ?? "")).join(" | ") + " |",
+  );
+  return "@startsalt\n{#\n" + lines.join("\n") + "\n}\n@endsalt";
 }
 
 async function renderBlocks(
@@ -360,7 +385,16 @@ async function blockLines(
   }
 
   if (type === "table") {
-    return [await renderTable(env, block, children)];
+    const matrix = await getTableMatrix(env, block, children);
+    if (matrix.length === 0) return ["[table]"];
+    try {
+      const png = await krokiPng("plantuml", renderTableSalt(matrix));
+      media.images.push({ bytes: png, name: "table.png", caption: "Table" });
+      return [];
+    } catch (error) {
+      console.error("table render failed", error);
+      return [renderTableText(matrix)];
+    }
   }
 
   if (type === "column_list" || type === "column") {
@@ -391,11 +425,17 @@ async function blockLines(
       lines.push(icon ? `${String(icon)} ${inner}` : inner);
     } else if (type === "code") {
       const lang = String(obj.language ?? "").toLowerCase();
-      // Mermaid is chart source; Telegram can't render it, so show labeled code.
-      if (lang === "mermaid") {
-        lines.push(`<b>Mermaid chart</b>\n<pre>${escapeHtmlText(richTextPlain(obj.rich_text))}</pre>`);
+      const codeText = richTextPlain(obj.rich_text);
+      if (lang === "mermaid" && codeText.trim()) {
+        try {
+          const png = await krokiPng("mermaid", codeText);
+          media.images.push({ bytes: png, name: "mermaid.png", caption: "Mermaid chart" });
+        } catch (error) {
+          console.error("mermaid render failed", error);
+          lines.push(`<b>Mermaid chart</b>\n<pre>${escapeHtmlText(codeText)}</pre>`);
+        }
       } else {
-        lines.push(`<pre>${escapeHtmlText(richTextPlain(obj.rich_text))}</pre>`);
+        lines.push(`<pre>${escapeHtmlText(codeText)}</pre>`);
       }
     } else if (type === "toggle") {
       lines.push(`▸ ${inner}`);
@@ -406,9 +446,17 @@ async function blockLines(
     const codeText = richTextPlain(obj.rich_text);
     if (codeText.trim()) {
       const lang = String(obj.language ?? "").toLowerCase();
-      lines.push(lang === "mermaid"
-        ? `<b>Mermaid chart</b>\n<pre>${escapeHtmlText(codeText)}</pre>`
-        : `<pre>${escapeHtmlText(codeText)}</pre>`);
+      if (lang === "mermaid") {
+        try {
+          const png = await krokiPng("mermaid", codeText);
+          media.images.push({ bytes: png, name: "mermaid.png", caption: "Mermaid chart" });
+        } catch (error) {
+          console.error("mermaid render failed", error);
+          lines.push(`<b>Mermaid chart</b>\n<pre>${escapeHtmlText(codeText)}</pre>`);
+        }
+      } else {
+        lines.push(`<pre>${escapeHtmlText(codeText)}</pre>`);
+      }
     }
   }
 

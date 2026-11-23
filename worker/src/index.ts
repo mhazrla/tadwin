@@ -31,6 +31,7 @@ import {
   sendKeyboardMessage as tgSendKeyboardMessage,
   sendMessage as tgSendMessage,
   sendPhoto as tgSendPhoto,
+  sendPhotoBytes as tgSendPhotoBytes,
   setMyCommands,
   setWebhook,
   webhookSecretToken,
@@ -136,6 +137,16 @@ async function sendPhoto(
   caption?: string,
 ): Promise<void> {
   await rememberMessages(env, chatId, [await tgSendPhoto(env, chatId, url, caption)]);
+}
+
+async function sendPhotoBytes(
+  env: Env,
+  chatId: number,
+  bytes: ArrayBuffer,
+  name: string,
+  caption?: string,
+): Promise<void> {
+  await rememberMessages(env, chatId, [await tgSendPhotoBytes(env, chatId, bytes, name, caption)]);
 }
 
 async function sendAudio(
@@ -1186,6 +1197,11 @@ async function sendContent(
   }
 
   for (const image of content.images) {
+    if (image.bytes) {
+      if (await trySend(() => sendPhotoBytes(env, chatId, image.bytes!, image.name ?? "image.png", image.caption))) continue;
+      await sendMessage(env, chatId, "Image: could not be sent.");
+      continue;
+    }
     const url = image.url;
     if (!url) {
       await sendMessage(env, chatId, "Image: no link available.");
