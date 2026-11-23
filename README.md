@@ -46,7 +46,7 @@ Then send `/start` to your bot.
 | `NOTION_TOKEN` | [notion.so/my-integrations](https://www.notion.so/my-integrations) → new internal integration |
 | `AI_API_KEY` | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
 | `AI_BASE_URL` | `https://generativelanguage.googleapis.com/v1beta/openai` |
-| `AI_MODEL` | e.g. `gemini-3.5-flash-lite` (check with `/models/<WEBHOOK_SECRET>`) |
+| `AI_MODEL` | e.g. `gemini-3.5-flash-lite` (check with `GET /aistatus/<WEBHOOK_SECRET>`) |
 | `WEBHOOK_SECRET` | any random string |
 
 The target Notion page must be shared with the integration (**⋯ → Connections**), and it must already
@@ -59,13 +59,13 @@ contain **at least one toggle entry** — Tadwin copies that entry's style. With
 | Step | What to send |
 |---|---|
 | 1 | The Notion page link |
-| 2 | *(optional)* `/title <text>` to set the entry title |
+| 2 | `/add` to start the entry (guided title), or `/add <text>` to set the title directly |
 | 3 | The material — plain text, or a `.txt` file for long notes (Telegram messages cap at ~4096 chars) |
-| 4 | Audio, then an image (image caption becomes the description) |
-| 5 | `/done` to build the entry |
+| 4 | Audio, then an image (image caption becomes the description) — can be sent in any order after the title |
+| 5 | `/done` to preview, then confirm **Send** to build the entry |
 
-Without `/title`, the title comes from a `title : ...` (or `judul : ...`) line, otherwise the first
-non-empty line.
+Material, files, and links are only accepted after `/add`. Without a title, the title comes from a
+`title : ...` (or `judul : ...`) line, otherwise the first non-empty line.
 
 ### Commands
 
@@ -78,9 +78,9 @@ The bot registers these in Telegram's command menu, so typing `/` shows the list
 | `/search <keyword>` | `/cari` | Search sections and pages (title + content) |
 | `/add [text]` | `/tambah` | Start a new entry (guided title); inline text sets title directly |
 | `/status` | — | Show the current session: page, title, material size, audio, image |
-| `/done` | `/selesai` | Build the entry in Notion |
+| `/done` | `/selesai` | Preview and build the entry in Notion (requires active `/add`) |
 | `/cancel` | `/batal` | Clear the current session |
-| `/clearchat` | `/bersihkan` | Clear the bot's messages in this chat, keeping the first `/start` guide |
+| `/clearchat` | `/bersihkan` | Delete tracked bot messages in this chat |
 | `/help` | — | Show help |
 
 ## Browsing a page
@@ -93,9 +93,9 @@ entries or sub-pages:
 2. otherwise its child pages, so you can drill down;
 3. otherwise the page's own content (audio, image, and text).
 
-Entries and child pages are both shown as inline buttons, 8 per page, with `◀ Prev` / `Next ▶` editing
-the same message so the chat does not fill up. Labels keep the start and end of the title, so long
-`Halaqah …` titles stay distinguishable.
+Entries and child pages are both shown as inline buttons, 8 per page, with `««` / `◀ Prev` / `Next ▶` / `»»`
+editing the same message so the chat does not fill up. Labels keep the start and end of the title, so long
+`Halaqah …` titles stay distinguishable. Repeated taps on the same page are ignored (no duplicate bubbles).
 
 If a page has **both** entries and child pages, the entries are shown first and one extra button
 (`Pages (n)`) switches the same message to the child pages; `Sections (n)` switches back. When a page
@@ -106,6 +106,7 @@ Tapping an entry deletes the list and sends it back:
 - **Audio** — sent as a playable file (Telegram fetches the Notion URL directly).
 - **Image** — sent as a photo, with its Notion caption.
 - **Text** — sent with formatting preserved (bold, italic, code, strike, links, quotes, lists, headings).
+- **Tables / Mermaid** — rendered as PNG images (via Kroki) and sent inline at their content position; if rendering fails, the bot falls back to text/code.
 
 Tapping a child page deletes the list, makes that page the session page, and immediately browses it
 with the same three-step order, so a hierarchy like
@@ -118,18 +119,19 @@ back to sending the link as text.
 
 ## Preview before /done
 
-`/done` no longer builds immediately. It shows a preview first: title, material length, audio/image
-counts, block types, and the first three formatted lines. Buttons: **Send** (build), **Edit title**,
-**Edit material**, and a **Ringkas (AI)** / **Raw (tanpa AI)** toggle to switch between AI-formatted
-(summarized explanatory text, dalil/Arab preserved verbatim) and raw local parsing.
+`/done` shows a preview first: title, material length, audio/image counts, block summary, format
+reference count, and a snippet of the formatted content. Buttons: **Send** (build), **Edit title**,
+**Edit material**, **Ringkas (AI)** / **Raw (tanpa AI)** toggle, and **Cancel**.
 
-The preview header says which path actually produced the text: `[Ringkas (AI)]` when the model's
-output passed validation, `[Raw (tanpa AI)]` for the manual toggle, or
-`[Fallback (AI gagal: <reason>)]` when the AI call failed or its output was rejected (too short,
-Arabic altered, suspicious). A fallback never drops dalil or Arabic text; it is the local parser.
+In AI mode, the bot extracts key points from the material and mirrors the block structure of existing
+entries on the same Notion page (format reference). Dalil/ayat/hadith/Arabic text (including harakat)
+is preserved verbatim; non-dalil text is condensed into key points.
 
-AI connectivity can be checked with `GET /aistatus/<WEBHOOK_SECRET>`, which reports the base URL,
-model, key length, HTTP status, and latency.
+The preview header shows the actual source: `[Ringkas (AI)]`, `[Raw (tanpa AI)]`, or
+`[Fallback (AI gagal: <reason>)]` when AI output is rejected/fails (local parser fallback keeps dalil/Arabic).
+
+AI connectivity can be checked with `GET /aistatus/<WEBHOOK_SECRET>` (reports base URL, model, HTTP
+status, and latency; endpoint is secret-path protected).
 
 ## Navigation after a pick
 
@@ -138,10 +140,10 @@ sense): **Back** re-opens the list you came from (or the previous level), **Home
 you first browsed. At the home page itself only **Back** is shown, to re-open the current list.
 
 ## Clearing the chat
-`/clearchat` (alias `/bersihkan`) deletes the messages the bot sent in this chat, except the first
-`/start` guide message, which is kept as a permanent command reference. Telegram only
-skipped. Your own messages stay. IDs are remembered from now on; messages sent before this feature
-was deployed cannot be removed by the bot.
+
+`/clearchat` (alias `/bersihkan`) deletes tracked bot messages in this chat. Telegram only allows a
+bot to delete its own messages, and only within 48 hours; older/untracked messages may be skipped.
+Your own messages cannot be deleted by the bot in a private chat.
 
 ---
 
@@ -158,8 +160,8 @@ read-only notice. Omit `OWNER_CHAT_ID` to keep the bot open to everyone (current
 - **Markdown material** — Gemini output, `.md` files, or pasted text is parsed into Notion blocks.
 
 Supported: `**bold**`, `*italic*`, `` `code` ``, `~~strike~~`, `[link](url)`, `# heading`, `> quote`,
-`-`/`1.` lists, `---`, fenced code, and Markdown tables (stored as code blocks so columns stay aligned).
-Arabic text and harakat are preserved byte-for-byte.
+`-`/`1.` lists, `---`, fenced code, and Markdown tables (rendered as images when read back from Notion).
+Arabic text and harakat are preserved byte-for-byte. Links in Telegram HTML output are scheme-allowlisted (`http/https/mailto/tg`).
 
 If the AI call fails or times out, a local Markdown parser takes over, so the entry still lands formatted.
 

@@ -24,10 +24,12 @@ toggle per entry, order **audio → image → text**, `>` lines become `quote`, 
 | `/search <keyword>` | `/cari` | Search sections and pages (title + content) |
 | `/add [text]` | `/tambah` | Start a new entry (guided title); inline text sets title directly |
 | `/status` | — | Show the current session |
-| `/done` | `/selesai` | Build the entry in Notion |
+| `/done` | `/selesai` | Preview and build the entry in Notion (requires active `/add`) |
 | `/cancel` | `/batal` | Clear the current session |
-| `/clearchat` | `/bersihkan` | Clear the bot's messages in this chat, keeping the first `/start` guide |
+| `/clearchat` | `/bersihkan` | Delete tracked bot messages in this chat |
 | `/help` | — | Show help |
+
+Before `/add`, material/files/links are rejected. `/done` requires an active `/add` flow.
 
 `/setup/<WEBHOOK_SECRET>` registers both the webhook and this command menu in one POST.
 
@@ -39,16 +41,16 @@ toggle per entry, order **audio → image → text**, `>` lines become `quote`, 
 2. otherwise its child pages, so deeper levels stay reachable;
 3. otherwise the page's own content (audio, image, then HTML text).
 
-Entries and child pages are rendered as an inline keyboard, 8 per page; `◀ Prev` / `Next ▶` edit that
-same message. A page with both kinds shows its entries first plus a `Pages (n)` button that switches
-the same message to the child pages (`Sections (n)` switches back); the switch row is omitted when a
-page has only one kind.
+Entries and child pages are rendered as an inline keyboard, 8 per page; `««` / `◀ Prev` / `Next ▶` / `»»`
+edit that same message. Repeated taps on the same page are ignored. A page with both kinds shows its
+entries first plus a `Pages (n)` button that switches the same message to the child pages (`Sections (n)`
+switches back); the switch row is omitted when a page has only one kind.
 
 Tapping an entry deletes the list message, then fetches that toggle's children and sends them to
-Telegram: audio as a playable file, image as a photo with its caption, then the text as Telegram HTML
-(bold, italic, code, strike, links, quotes, lists, headings preserved). Tapping a child page deletes
-the list, makes it the session page, and browses it with the same order, so a page with neither
-entries nor child pages is still readable. `/done` afterwards appends to the page opened last.
+Telegram in Notion order: audio as a playable file, image as a photo with its caption, tables/Mermaid
+rendered as PNG images (via Kroki, with text fallback), and text as Telegram HTML (bold, italic, code,
+strike, links, quotes, lists, headings preserved). Tapping a child page deletes the list, makes it the
+session page, and browses it with the same order. `/done` afterwards appends to the page opened last.
 
 After a pick the bot sends **Back** and **Home** buttons: **Back** re-opens the list you came from
 (or the previous level), **Home** jumps to the page you first browsed. At the home page only **Back**
@@ -62,12 +64,23 @@ The webhook must receive `callback_query` updates for the buttons to work — `/
 version, otherwise taps are silently dropped.
 
 Notion returns signed media URLs that expire after about an hour; they are used immediately and never
-stored. If a URL has expired, the bot sends the link as text instead.
+stored. If a URL has expired, the bot sends the link as text instead. Tables and Mermaid charts are
+rendered to PNG via the public Kroki service (content is sent to Kroki); on failure, the bot falls back
+to text/code.
+
+## Preview before /done
+
+`/done` shows a preview (title, material, audio/image, block summary, format reference, snippet).
+Buttons: **Send**, **Edit title**, **Edit material**, **Ringkas (AI)/Raw (tanpa AI)**, **Cancel**.
+AI mode extracts key points and mirrors existing section format on the page; dalil/ayat/hadith/Arabic
+(including harakat) are preserved verbatim. Header shows `[Ringkas (AI)]`, `[Raw (tanpa AI)]`, or
+`[Fallback (AI gagal: ...)]`. Check AI with `GET /aistatus/<WEBHOOK_SECRET>`.
 
 ## Clearing the chat
 
-`/clearchat` (alias `/bersihkan`) deletes the messages the bot sent in this chat, except the first
-`/start` guide message, which is kept as a permanent command reference. Telegram only allows a bot to delete its own messages, and only within 48 hours, so older messages are counted as skipped and the rest of the list is cleared. Your own messages stay. The bot remembers the IDs of messages it sends from now on; messages sent before this feature was deployed cannot be removed by the bot.
+`/clearchat` (alias `/bersihkan`) deletes tracked bot messages in this chat. Telegram only allows a
+bot to delete its own messages, and only within 48 hours; older/untracked messages may be skipped.
+Your own messages cannot be deleted by the bot in a private chat.
 
 - A Cloudflare account (free).
 - A Telegram bot token from [@BotFather](https://t.me/BotFather).
@@ -213,4 +226,4 @@ src/
 | `409 Conflict` | Another program is polling the same bot token; stop it. |
 | Audio upload rejected | Notion accepts only the six content types above and needs the matching extension. |
 | `page not found` | The Notion page is not shared with the integration. |
-| No toggle created | The page has no existing toggle entry to copy the style from. |
+| Image shows as file | Telegram rejected photo dimensions; bot falls back to document. If it keeps happening, check the source table/mermaid. |
