@@ -13,6 +13,13 @@ Rules:
 - Short chapter titles/headings may use "heading_2" or "heading_3"; bulleted lists use "bulleted_list_item".
 - Split long passages into reasonable paragraphs. Do not include the entry title line.
 
+Boilerplate to ignore (do NOT include in output):
+- Group/channel headers and footers: decorative borders, group names, meeting numbers, dates, links, social media, logos, "official account" blocks.
+- Message metadata: speaker name, kitab/book title, audio/recording title, location, time - unless they are part of the actual explanation.
+- Opening/closing greetings that are only boilerplate (salam, basmalah-only lines, "semoga bermanfaat", "barakallah fiikum", closing salam, sign-off). Keep greetings only if they carry meaning in the content.
+- Separators and decorative lines.
+Keep only the core study content: dalil, explanation, points, rulings, stories/examples that teach the point.
+
 Format reference (copy the shape, not the words):
 - EXAMPLES are real entries from the same Notion page, one block per line, tagged with its type:
   [h1]/[h2]/[h3] headings, [para] paragraph, [quote] dalil, [bullet] bullet list,
