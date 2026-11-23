@@ -649,16 +649,12 @@ async function setGuideMessageId(env: Env, chatId: number, id: number): Promise<
   }
 }
 
-/**
- * Delete all tracked bot messages in this chat. Telegram only allows deleting
- * messages the bot sent, and only within 48 hours; older ones are skipped.
- */
-async function handleClearChat(env: Env, chatId: number): Promise<void> {
+async function clearTrackedBotMessages(
+  env: Env,
+  chatId: number,
+): Promise<{ deleted: number; skipped: number; remaining: number; total: number }> {
   const ids = await botMessages(env, chatId);
-  if (ids.length === 0) {
-    await sendMessage(env, chatId, "Nothing to clear in this chat.");
-    return;
-  }
+  if (ids.length === 0) return { deleted: 0, skipped: 0, remaining: 0, total: 0 };
 
   const started = Date.now();
   let deleted = 0;
@@ -681,10 +677,22 @@ async function handleClearChat(env: Env, chatId: number): Promise<void> {
   if (remaining.length > 0) {
     await sessionCall(env, chatId, { op: "addBotMessages", items: remaining });
   }
+  return { deleted, skipped, remaining: remaining.length, total: ids.length };
+}
 
-  const parts = [`Deleted ${deleted} bot message(s).`];
-  if (skipped > 0) parts.push(`${skipped} could not be deleted (too old or already gone).`);
-  if (remaining.length > 0) parts.push(`${remaining.length} left, send /clearchat again.`);
+/**
+ * Delete all tracked bot messages in this chat. Telegram only allows deleting
+ * messages the bot sent, and only within 48 hours; older ones are skipped.
+ */
+async function handleClearChat(env: Env, chatId: number): Promise<void> {
+  const r = await clearTrackedBotMessages(env, chatId);
+  if (r.total === 0) {
+    await sendMessage(env, chatId, "Nothing to clear in this chat.");
+    return;
+  }
+  const parts = [`Deleted ${r.deleted} bot message(s).`];
+  if (r.skipped > 0) parts.push(`${r.skipped} could not be deleted (too old or already gone).`);
+  if (r.remaining > 0) parts.push(`${r.remaining} left, send /clearchat again.`);
   await sendMessage(env, chatId, parts.join(" "));
 }
 
@@ -1174,6 +1182,9 @@ async function retrieveSection(
       console.error("delete list failed", messageOf(error));
     }
   }
+
+  // Keep the chat focused on the material being opened.
+  await clearTrackedBotMessages(env, chatId);
 
   await sendMessage(env, chatId, `Reading: ${section.title}`);
 
