@@ -1190,46 +1190,54 @@ async function retrieveSection(
   await sendNavButtons(env, chatId);
 }
 
-/** Audio, then image, then the formatted text for one block or page. */
+/** Send content in the same order it appears in Notion. */
 async function sendContent(
   env: Env,
   chatId: number,
   content: SectionContent,
 ): Promise<void> {
-  for (const audio of content.audios) {
-    const url = audio.url;
-    if (!url) {
-      await sendMessage(env, chatId, "Audio: no link available.");
-      continue;
-    }
-    if (!(await trySend(() => sendAudio(env, chatId, url, audio.caption)))) continue;
-    if (!(await trySend(() => sendDocument(env, chatId, url, audio.caption)))) continue;
-    await sendMessage(env, chatId, `Audio: ${url}`);
-  }
-
-  for (const image of content.images) {
-    if (image.bytes) {
-      const err = await trySend(() => sendPhotoBytes(env, chatId, image.bytes!, image.name ?? "image.png", image.caption));
-      if (!err) continue;
-      const err2 = await trySend(() => sendDocumentBytes(env, chatId, image.bytes!, image.name ?? "image.png", image.caption));
-      if (!err2) continue;
-      await sendMessage(env, chatId, `Image: could not be sent (${err2.slice(0, 120)}).`);
-      continue;
-    }
-    const url = image.url;
-    if (!url) {
-      await sendMessage(env, chatId, "Image: no link available.");
-      continue;
-    }
-    if (!(await trySend(() => sendPhoto(env, chatId, url, image.caption)))) continue;
-    if (!(await trySend(() => sendDocument(env, chatId, url, image.caption)))) continue;
-    await sendMessage(env, chatId, `Image: ${url}`);
-  }
-
-  if (content.html.length > 0) {
-    await sendHtml(env, chatId, content.html);
-  } else if (content.audios.length === 0 && content.images.length === 0) {
+  if (content.items.length === 0) {
     await sendMessage(env, chatId, "That entry is empty.");
+    return;
+  }
+
+  for (const item of content.items) {
+    if (item.kind === "audio") {
+      const url = item.audio.url;
+      if (!url) {
+        await sendMessage(env, chatId, "Audio: no link available.");
+        continue;
+      }
+      if (!(await trySend(() => sendAudio(env, chatId, url, item.audio.caption)))) continue;
+      if (!(await trySend(() => sendDocument(env, chatId, url, item.audio.caption)))) continue;
+      await sendMessage(env, chatId, `Audio: ${url}`);
+      continue;
+    }
+
+    if (item.kind === "image") {
+      const image = item.image;
+      if (image.bytes) {
+        const err = await trySend(() => sendPhotoBytes(env, chatId, image.bytes!, image.name ?? "image.png", image.caption));
+        if (!err) continue;
+        const err2 = await trySend(() => sendDocumentBytes(env, chatId, image.bytes!, image.name ?? "image.png", image.caption));
+        if (!err2) continue;
+        await sendMessage(env, chatId, `Image: could not be sent (${err2.slice(0, 120)}).`);
+        continue;
+      }
+      const url = image.url;
+      if (!url) {
+        await sendMessage(env, chatId, "Image: no link available.");
+        continue;
+      }
+      if (!(await trySend(() => sendPhoto(env, chatId, url, image.caption)))) continue;
+      if (!(await trySend(() => sendDocument(env, chatId, url, image.caption)))) continue;
+      await sendMessage(env, chatId, `Image: ${url}`);
+      continue;
+    }
+
+    if (item.kind === "html" && item.html.length > 0) {
+      await sendHtml(env, chatId, item.html);
+    }
   }
 }
 

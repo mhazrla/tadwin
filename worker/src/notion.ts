@@ -216,10 +216,13 @@ export interface SectionImage {
   caption: string;
 }
 
+export type ContentItem =
+  | { kind: "html"; html: string[] }
+  | { kind: "audio"; audio: { url: string | null; caption: string } }
+  | { kind: "image"; image: SectionImage };
+
 export interface SectionContent {
-  html: string[];
-  audios: Array<{ url: string | null; caption: string }>;
-  images: SectionImage[];
+  items: ContentItem[];
 }
 
 function fileUrl(obj: Json | undefined): string | null {
@@ -236,14 +239,9 @@ export async function getSectionContent(
   sectionId: string,
 ): Promise<SectionContent> {
   const children = await getChildren(env, sectionId);
-  const media: MediaSink = { audios: [], images: [] };
-  const html = await renderBlocks(env, children, 0, media);
-  return { html, audios: media.audios, images: media.images };
-}
-
-interface MediaSink {
-  audios: SectionContent["audios"];
-  images: SectionContent["images"];
+  const items: ContentItem[] = [];
+  await renderBlocks(env, children, 0, items, false);
+  return { items };
 }
 
 /** Notion nests translations and sub-points inside quote blocks; do not lose them. */
@@ -357,11 +355,22 @@ async function renderBlocks(
   env: Env,
   blocks: Json[],
   depth: number,
-  media: MediaSink,
+  items: ContentItem[] | null,
   inQuote = false,
 ): Promise<string[]> {
   const collected: { lines: string[]; isList: boolean }[] = [];
   let number = 0;
+
+  const flushHtml = () => {
+    if (!items || collected.length === 0) return;
+    const out: string[] = [];
+    for (let i = 0; i < collected.length; i++) {
+      if (i > 0 && !collected[i].isList) out.push("");
+      out.push(...collected[i].lines);
+    }
+    if (out.length) items.push({ kind: "html", html: out });
+    collected.length = 0;
+  };
 
   for (const block of blocks) {
     const type = block.type as string | undefined;
@@ -373,11 +382,26 @@ async function renderBlocks(
       number = 0;
     }
 
-    const bl = await blockLines(env, block, depth, media, number, inQuote);
-    if (bl.length === 0) continue;
-    const isList = bl[0].startsWith("• ") || /^\d+\.\s/.test(bl[0]);
-    collected.push({ lines: bl, isList });
+    const res = await blockLines(env, block, depth, items, number, inQuote);
+    if (res.media) {
+      if (items && !inQuote) {
+        flushHtml();
+        items.push(res.media);
+      }
+      // In nested/quote context, media can't be sent inline; blockLines should have provided fallback lines.
+      if (res.lines.length) {
+        const isList = res.lines[0].startsWith("• ") || /^\d+\.\s/.test(res.lines[0]);
+        collected.push({ lines: res.lines, isList });
+      }
+      continue;
+    }
+
+    if (res.lines.length === 0) continue;
+    const isList = res.lines[0].startsWith("• ") || /^\d+\.\s/.test(res.lines[0]);
+    collected.push({ lines: res.lines, isList });
   }
+
+  flushHtml();
 
   const out: string[] = [];
   for (let i = 0; i < collected.length; i++) {
@@ -391,21 +415,19 @@ async function blockLines(
   env: Env,
   block: Json,
   depth: number,
-  media: MediaSink,
+  items: ContentItem[] | null,
   number: number,
   inQuote: boolean,
-): Promise<string[]> {
+): Promise<{ lines: string[]; media?: ContentItem }> {
   const type = block.type as string | undefined;
-  if (!type) return [];
+  if (!type) return { lines: [] };
   const obj = (block[type] as Json | undefined) ?? {};
 
   if (type === "audio") {
-    media.audios.push({ url: fileUrl(obj), caption: richTextToHtml(obj.caption) });
-    return [];
+    return { lines: [], media: { kind: "audio", audio: { url: fileUrl(obj), caption: richTextToHtml(obj.caption) } } };
   }
   if (type === "image") {
-    media.images.push({ url: fileUrl(obj), caption: richTextToHtml(obj.caption) });
-    return [];
+    return { lines: [], media: { kind: "image", image: { url: fileUrl(obj), caption: richTextToHtml(obj.caption) } } };
   }
 
   const children =
@@ -413,39 +435,40 @@ async function blockLines(
       ? await getChildren(env, block.id as string)
       : [];
 
-  if (type === "divider") return ["———"];
+  if (type === "divider") return { lines: ["———"] };
 
   if (type === "quote") {
     const lines: string[] = [];
     const own = richTextToHtml(obj.rich_text).trim();
     if (own) lines.push(own);
-    lines.push(...(await renderBlocks(env, children, depth + 1, media, true)));
-    if (!lines.length) return [];
+    lines.push(...(await renderBlocks(env, children, depth + 1, null, true)));
+    if (!lines.length) return { lines: [] };
     // Nested quotes stay inside the outer one: Telegram cannot nest blockquotes.
-    return inQuote ? lines : [`<blockquote>${lines.join("\n")}</blockquote>`];
+    return { lines: inQuote ? lines : [`<blockquote>${lines.join("\n")}</blockquote>`] };
   }
 
   if (type === "table") {
     const matrix = await getTableMatrix(env, block, children);
-    if (matrix.length === 0) return ["[table]"];
-    try {
-      const png = await krokiPng("graphviz", renderTableDot(matrix));
-      media.images.push({ bytes: png, name: "table.png", caption: "" });
-      return [];
-    } catch (error) {
-      console.error("table render failed", error);
-      return [renderTableText(matrix)];
+    if (matrix.length === 0) return { lines: ["[table]"] };
+    if (items && !inQuote) {
+      try {
+        const png = await krokiPng("graphviz", renderTableDot(matrix));
+        return { lines: [], media: { kind: "image", image: { bytes: png, name: "table.png", caption: "" } } };
+      } catch (error) {
+        console.error("table render failed", error);
+      }
     }
+    return { lines: [renderTableText(matrix)] };
   }
 
   if (type === "column_list" || type === "column") {
-    if (!children.length) return [];
-    return renderBlocks(env, children, depth + 1, media, inQuote);
+    if (!children.length) return { lines: [] };
+    return { lines: await renderBlocks(env, children, depth + 1, inQuote ? null : items, inQuote) };
   }
 
   if (type === "equation") {
     const expr = String(obj.expression ?? "").trim();
-    return expr ? [`<pre>${escapeHtmlText(expr)}</pre>`] : [];
+    return { lines: expr ? [`<pre>${escapeHtmlText(expr)}</pre>`] : [] };
   }
 
   const inner = richTextToHtml(obj.rich_text);
@@ -467,10 +490,10 @@ async function blockLines(
     } else if (type === "code") {
       const lang = String(obj.language ?? "").toLowerCase();
       const codeText = richTextPlain(obj.rich_text);
-      if (lang === "mermaid" && codeText.trim()) {
+      if (lang === "mermaid" && codeText.trim() && items && !inQuote) {
         try {
           const png = await krokiPng("mermaid", codeText);
-          media.images.push({ bytes: png, name: "mermaid.png", caption: "Mermaid chart" });
+          return { lines: [], media: { kind: "image", image: { bytes: png, name: "mermaid.png", caption: "Mermaid chart" } } };
         } catch (error) {
           console.error("mermaid render failed", error);
           lines.push(`<b>Mermaid chart</b>\n<pre>${escapeHtmlText(codeText)}</pre>`);
@@ -487,10 +510,10 @@ async function blockLines(
     const codeText = richTextPlain(obj.rich_text);
     if (codeText.trim()) {
       const lang = String(obj.language ?? "").toLowerCase();
-      if (lang === "mermaid") {
+      if (lang === "mermaid" && items && !inQuote) {
         try {
           const png = await krokiPng("mermaid", codeText);
-          media.images.push({ bytes: png, name: "mermaid.png", caption: "Mermaid chart" });
+          return { lines: [], media: { kind: "image", image: { bytes: png, name: "mermaid.png", caption: "Mermaid chart" } } };
         } catch (error) {
           console.error("mermaid render failed", error);
           lines.push(`<b>Mermaid chart</b>\n<pre>${escapeHtmlText(codeText)}</pre>`);
@@ -502,11 +525,11 @@ async function blockLines(
   }
 
   if (children.length) {
-    const sub = await renderBlocks(env, children, depth + 1, media, inQuote);
+    const sub = await renderBlocks(env, children, depth + 1, inQuote ? null : items, inQuote);
     for (const line of sub) lines.push(inQuote ? line : `  ${line}`);
   }
 
-  return lines;
+  return { lines };
 }
 
 /** Upload a file through the File Upload API; returns the file_upload id. */
