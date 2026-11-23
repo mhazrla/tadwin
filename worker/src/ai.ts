@@ -81,6 +81,16 @@ function arabicSequences(text: string): string[] {
 const stripHarakat = (text: string): string =>
   text.replace(/[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06DC\u06DF-\u06E4\u06E7-\u06E8\u06EA-\u06ED]/g, "");
 
+// Normalize common Arabic letter variants for preservation comparison only.
+const normalizeArabicLetters = (text: string): string =>
+  stripHarakat(text)
+    .replace(/[أإآٱ]/g, "ا")
+    .replace(/ة/g, "ه")
+    .replace(/ى/g, "ي")
+    .replace(/ؤ/g, "و")
+    .replace(/ئ/g, "ي")
+    .replace(/ء/g, "");
+
 const squash = (text: string): string =>
   text.normalize("NFC").replace(/\u0640/g, "").replace(/\s+/g, "");
 
@@ -115,11 +125,27 @@ function allArabicPreserved(input: string, output: string): { ok: boolean; missi
     return { ok: true, missing, total: seqs.length };
   }
   const ratioNoH = missingNoH / seqs.length;
-  if (ratioNoH <= 0.2 && missingNoH <= 8) {
+  if (ratioNoH <= 0.25 && missingNoH <= 10) {
     console.warn("AI altered minor Arabic fragments ignoring harakat; allowing", { missing: missingNoH, total: seqs.length });
     return { ok: true, missing: missingNoH, total: seqs.length };
   }
-  return { ok: false, missing: missingNoH, total: seqs.length };
+
+  // Third pass: normalize common letter variants (alef/hamza/taa marbuta/yaa).
+  const flatNorm = normalizeArabicLetters(flat);
+  let missingNorm = 0;
+  for (const seq of seqs) {
+    if (!flatNorm.includes(normalizeArabicLetters(seq))) missingNorm++;
+  }
+  if (missingNorm === 0) {
+    console.warn("AI changed only Arabic letter variants; allowing", { missing: missingNoH, total: seqs.length });
+    return { ok: true, missing: missingNoH, total: seqs.length };
+  }
+  const ratioNorm = missingNorm / seqs.length;
+  if (ratioNorm <= 0.3 && missingNorm <= 15) {
+    console.warn("AI altered minor Arabic fragments with normalization; allowing", { missing: missingNorm, total: seqs.length });
+    return { ok: true, missing: missingNorm, total: seqs.length };
+  }
+  return { ok: false, missing: missingNorm, total: seqs.length };
 }
 
 const RETRY_NOTE =
@@ -141,11 +167,17 @@ export async function formatMaterial(
     if (blocks.length) return { blocks, source: "ai" };
   }
 
-  // The model sometimes over-trims; one corrective retry is cheaper than
+  // The model sometimes over-trims or normalizes Arabic; one corrective retry is cheaper than
   // silently shipping raw text.
-  const retryable = verdict.reason === "too_short" || verdict.reason === "ai_parse";
+  const retryable =
+    verdict.reason === "too_short" ||
+    verdict.reason === "ai_parse" ||
+    verdict.reason.startsWith("arabic_dropped");
   if (retryable) {
-    const retry = await callAi(env, material, title, references, RETRY_NOTE);
+    const note = verdict.reason.startsWith("arabic_dropped")
+      ? "\n\nIMPORTANT: your previous answer altered or dropped Arabic/dalil text. Copy every ayat, hadith, and Arabic phrase VERBATIM exactly as in the source (including harakat). Do not paraphrase or normalize Arabic."
+      : RETRY_NOTE;
+    const retry = await callAi(env, material, title, references, note);
     const again = judge(retry.items, material, inputLen);
     if (again.ok) {
       const blocks = buildBlocks(retry.items!);
