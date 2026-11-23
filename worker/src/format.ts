@@ -123,12 +123,15 @@ export function extractTitle(material: string): string {
     }
   }
   const isNoise = (line: string): boolean => {
-    if (/^https?:\/\//i.test(line)) return true;
-    if (/^[\s\p{P}\p{S}\p{Extended_Pictographic}═╔╗╚╝║╠╣╦╩╬❖•ೋ°]+$/u.test(line)) return true;
-    if (/^(whatsapp|telegram|instagram|facebook|fanspage|website|official|grup|group|channel)\b/i.test(line)) return true;
-    if (/^(oleh|pemateri|ustadz|ustadzah|kitab|audio|pertemuan|sesi|episode)\b/i.test(line) && line.length < 140) return true;
-    if (/^(senin|selasa|rabu|kamis|jumat|sabtu|ahad|minggu)\b/i.test(line)) return true;
-    const letters = line.replace(/[^\p{L}\p{N}]/gu, "");
+    const cleaned = line.replace(/^[\s\p{P}\p{S}\p{Extended_Pictographic}]+/u, "").trim();
+    if (/^https?:\/\//i.test(cleaned) || /^https?:\/\//i.test(line)) return true;
+    if (/^[\s\p{P}\p{S}\p{Extended_Pictographic}═╔╗╚╝║╠╣╦╩╬❖•ೋ°☛]+$/u.test(line)) return true;
+    if (/^(whatsapp|telegram|instagram|facebook|fanspage|website|official|grup|group|channel)\b/i.test(cleaned)) return true;
+    if (/^(oleh|pemateri|ustadz|ustadzah|kitab|audio|pertemuan|sesi|episode)\b/i.test(cleaned) && cleaned.length < 160) return true;
+    if (/^(senin|selasa|rabu|kamis|jumat|sabtu|ahad|minggu)\b/i.test(cleaned)) return true;
+    if (/^\d{1,2}\s+(muharram|safar|rabi|jumad|rajab|sya'?ban|ramadhan|syawwal|dzul|dhu)/i.test(cleaned)) return true;
+    if (/^\d{1,2}\s+(januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember)\b/i.test(cleaned)) return true;
+    const letters = cleaned.replace(/[^\p{L}\p{N}]/gu, "");
     return letters.length < 4;
   };
   for (const line of lines) {

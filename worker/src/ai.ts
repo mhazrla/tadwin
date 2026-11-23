@@ -15,8 +15,8 @@ Rules:
 
 Boilerplate to ignore (do NOT include in output):
 - Group/channel headers and footers: decorative borders, group names, meeting numbers, dates, links, social media, logos, "official account" blocks.
-- Message metadata: speaker name, kitab/book title, audio/recording title, location, time - unless they are part of the actual explanation.
-- Opening/closing greetings that are only boilerplate (salam, basmalah-only lines, "semoga bermanfaat", "barakallah fiikum", closing salam, sign-off). Keep greetings only if they carry meaning in the content.
+- Message metadata: speaker name, kitab/book title, audio/recording title/number, meeting/session number, location, time - unless they are part of the actual explanation.
+- Opening/closing greetings and filler transitions: salam, basmalah-only lines, "amma ba'du" standing alone, "kita lanjutkan kajian", "hadits terakhir dalam bab ini", closing prayers/sign-off, "barakallah fiikum", closing salam. Keep greetings only if they carry meaning in the content.
 - Separators and decorative lines.
 Keep only the core study content: dalil, explanation, points, rulings, stories/examples that teach the point.
 
