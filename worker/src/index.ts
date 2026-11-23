@@ -1191,15 +1191,16 @@ async function sendContent(
       await sendMessage(env, chatId, "Audio: no link available.");
       continue;
     }
-    if (await trySend(() => sendAudio(env, chatId, url, audio.caption))) continue;
-    if (await trySend(() => sendDocument(env, chatId, url, audio.caption))) continue;
+    if (!(await trySend(() => sendAudio(env, chatId, url, audio.caption)))) continue;
+    if (!(await trySend(() => sendDocument(env, chatId, url, audio.caption)))) continue;
     await sendMessage(env, chatId, `Audio: ${url}`);
   }
 
   for (const image of content.images) {
     if (image.bytes) {
-      if (await trySend(() => sendPhotoBytes(env, chatId, image.bytes!, image.name ?? "image.png", image.caption))) continue;
-      await sendMessage(env, chatId, "Image: could not be sent.");
+      const err = await trySend(() => sendPhotoBytes(env, chatId, image.bytes!, image.name ?? "image.png", image.caption));
+      if (!err) continue;
+      await sendMessage(env, chatId, `Image: could not be sent (${err.slice(0, 120)}).`);
       continue;
     }
     const url = image.url;
@@ -1207,8 +1208,8 @@ async function sendContent(
       await sendMessage(env, chatId, "Image: no link available.");
       continue;
     }
-    if (await trySend(() => sendPhoto(env, chatId, url, image.caption))) continue;
-    if (await trySend(() => sendDocument(env, chatId, url, image.caption))) continue;
+    if (!(await trySend(() => sendPhoto(env, chatId, url, image.caption)))) continue;
+    if (!(await trySend(() => sendDocument(env, chatId, url, image.caption)))) continue;
     await sendMessage(env, chatId, `Image: ${url}`);
   }
 
@@ -1220,13 +1221,14 @@ async function sendContent(
 }
 
 /** Media URLs from Notion can fail (expired signature); fall back to a link. */
-async function trySend(send: () => Promise<void>): Promise<boolean> {
+async function trySend(send: () => Promise<void>): Promise<string | null> {
   try {
     await send();
-    return true;
+    return null;
   } catch (error) {
-    console.error("media send failed", messageOf(error));
-    return false;
+    const msg = messageOf(error);
+    console.error("media send failed", msg);
+    return msg;
   }
 }
 
