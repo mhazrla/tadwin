@@ -118,11 +118,24 @@ export function extractTitle(material: string): string {
       const idx = line.indexOf(":");
       if (idx >= 0) {
         const value = line.slice(idx + 1).trim();
-        if (value) return value;
+        if (value) return value.slice(0, 120);
       }
     }
   }
-  return lines[0] ?? "New entry";
+  const isNoise = (line: string): boolean => {
+    if (/^https?:\/\//i.test(line)) return true;
+    if (/^[\s\p{P}\p{S}\p{Extended_Pictographic}═╔╗╚╝║╠╣╦╩╬❖•ೋ°]+$/u.test(line)) return true;
+    if (/^(whatsapp|telegram|instagram|facebook|fanspage|website|official|grup|group|channel)\b/i.test(line)) return true;
+    if (/^(oleh|pemateri|ustadz|ustadzah|kitab|audio|pertemuan|sesi|episode)\b/i.test(line) && line.length < 140) return true;
+    if (/^(senin|selasa|rabu|kamis|jumat|sabtu|ahad|minggu)\b/i.test(line)) return true;
+    const letters = line.replace(/[^\p{L}\p{N}]/gu, "");
+    return letters.length < 4;
+  };
+  for (const line of lines) {
+    if (isNoise(line)) continue;
+    return line.slice(0, 120);
+  }
+  return lines[0]?.slice(0, 120) ?? "New entry";
 }
 
 /** Notion caps rich_text at 2000 characters. */

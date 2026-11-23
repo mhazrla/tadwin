@@ -1274,6 +1274,15 @@ async function handleText(env: Env, chatId: number, msg: TgMessage): Promise<voi
   const session = await sessionCall(env, chatId, { op: "get" });
 
   if (session.awaitingTitle) {
+    // If the user pasted a full message as title, treat it as material.
+    if (text.length > 300 || text.split(/\n/).length > 3) {
+      const autoTitle = extractTitle(text);
+      await sessionCall(env, chatId, { op: "setTitle", title: autoTitle });
+      await sessionCall(env, chatId, { op: "setAwaitingTitle", value: false });
+      await sessionCall(env, chatId, { op: "push", field: "materials", value: text });
+      await sendMessage(env, chatId, `Title auto-set: ${autoTitle}\nMaterial received (${text.length} characters). Send audio/image if needed, then /done.`);
+      return;
+    }
     await sessionCall(env, chatId, { op: "setTitle", title: text });
     await sessionCall(env, chatId, { op: "setAwaitingTitle", value: false });
     await sendMessage(env, chatId, "Title set. Now send material, audio, and image (any order), then /done.");
@@ -1281,7 +1290,8 @@ async function handleText(env: Env, chatId: number, msg: TgMessage): Promise<voi
   }
 
   if (session.awaitingEdit === "title") {
-    await sessionCall(env, chatId, { op: "setTitle", title: text });
+    const newTitle = text.length > 200 || text.split(/\n/).length > 3 ? extractTitle(text) : text;
+    await sessionCall(env, chatId, { op: "setTitle", title: newTitle });
     await sessionCall(env, chatId, { op: "setAwaitingEdit", value: null });
     await sendMessage(env, chatId, "Title updated.");
     await handlePreview(env, chatId);
@@ -1560,7 +1570,12 @@ async function handlePreview(env: Env, chatId: number): Promise<void> {
   }
 
   const material = session.materials.join("\n\n").trim();
-  const title = session.title?.trim() || extractTitle(material);
+  let title = session.title?.trim() || "";
+  // If the user pasted the whole message as title, derive a clean title instead.
+  if (!title || title.length > 200 || title.split(/\n/).length > 3) {
+    title = extractTitle(material) || extractTitle(title);
+    if (session.title?.trim()) await sessionCall(env, chatId, { op: "setTitle", title });
+  }
   const mode = session.summaryMode === "raw" ? "raw" : "ai";
 
   await sendMessage(env, chatId, "Preparing preview...");
@@ -1669,7 +1684,11 @@ async function handleConfirmDone(env: Env, chatId: number): Promise<void> {
   await setLastDone(env, chatId, now);
 
   const material = session.materials.join("\n\n").trim();
-  const title = session.title?.trim() || extractTitle(material);
+  let title = session.title?.trim() || "";
+  if (!title || title.length > 200 || title.split(/\n/).length > 3) {
+    title = extractTitle(material) || extractTitle(title);
+    if (session.title?.trim()) await sessionCall(env, chatId, { op: "setTitle", title });
+  }
 
   const progressIds = await sendMessage(env, chatId, "Building entry...");
   const progressId = progressIds[0];
