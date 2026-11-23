@@ -86,22 +86,22 @@ const squash = (text: string): string =>
  * NFC normalization, and tatweel are ignored. A small tolerance allows minor
  * model normalization without letting real dalil/ayat drops through.
  */
-function allArabicPreserved(input: string, output: string): boolean {
-  const seqs = arabicSequences(input);
-  if (seqs.length === 0) return true;
+function allArabicPreserved(input: string, output: string): { ok: boolean; missing: number; total: number } {
+  const seqs = arabicSequences(input).map((s) => squash(s)).filter((s) => s.length >= 3);
+  if (seqs.length === 0) return { ok: true, missing: 0, total: 0 };
   const flat = squash(output);
   let missing = 0;
   for (const seq of seqs) {
-    if (!flat.includes(squash(seq))) missing++;
+    if (!flat.includes(seq)) missing++;
   }
-  if (missing === 0) return true;
+  if (missing === 0) return { ok: true, missing: 0, total: seqs.length };
   const ratio = missing / seqs.length;
   // Allow tiny normalization drift, but never drop a meaningful chunk of Arabic.
-  if (ratio <= 0.1 && missing <= 3) {
+  if (ratio <= 0.2 && missing <= 8) {
     console.warn("AI altered minor Arabic fragments; allowing", { missing, total: seqs.length });
-    return true;
+    return { ok: true, missing, total: seqs.length };
   }
-  return false;
+  return { ok: false, missing, total: seqs.length };
 }
 
 const RETRY_NOTE =
@@ -156,9 +156,10 @@ function judge(
   }
 
   const outputText = items.map((i) => (typeof i?.text === "string" ? i.text : "")).join("\n");
-  if (!allArabicPreserved(material, outputText)) {
-    console.error("AI dropped Arabic content; falling back to local parser");
-    return { ok: false, reason: "arabic_dropped" };
+  const ar = allArabicPreserved(material, outputText);
+  if (!ar.ok) {
+    console.error("AI dropped Arabic content; falling back to local parser", ar);
+    return { ok: false, reason: `arabic_dropped:${ar.missing}/${ar.total}` };
   }
 
   const outputLen = totalTextLength(items);

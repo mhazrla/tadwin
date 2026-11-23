@@ -1531,8 +1531,6 @@ function humanReason(reason?: string): string {
   switch (reason) {
     case "too_short":
       return "output terlalu pendek";
-    case "arabic_dropped":
-      return "teks Arab berubah";
     case "injected":
       return "output mencurigakan";
     case "ai_timeout":
@@ -1544,6 +1542,7 @@ function humanReason(reason?: string): string {
     case "ai_error":
       return "koneksi gagal";
     default:
+      if (reason && reason.startsWith("arabic_dropped:")) return "teks Arab berubah (" + reason.slice(15) + ")";
       if (reason && reason.startsWith("ai_http_")) return "HTTP " + reason.slice(8);
       return reason || "tidak diketahui";
   }
