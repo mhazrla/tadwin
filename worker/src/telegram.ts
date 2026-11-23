@@ -134,9 +134,10 @@ export async function sendKeyboardMessage(
   text: string,
   buttons: InlineButton[][],
 ): Promise<number | undefined> {
+  const safeText = text.length > 4096 ? text.slice(0, 4093) + "..." : text;
   const message = await tg<{ message_id: number }>(env, "sendMessage", {
     chat_id: chatId,
-    text,
+    text: safeText,
     disable_web_page_preview: true,
     reply_markup: { inline_keyboard: buttons },
   });
@@ -151,10 +152,11 @@ export async function editMessageText(
   text: string,
   buttons?: InlineButton[][],
 ): Promise<void> {
+  const safeText = text.length > 4096 ? text.slice(0, 4093) + "..." : text;
   const payload: Record<string, unknown> = {
     chat_id: chatId,
     message_id: messageId,
-    text,
+    text: safeText,
     disable_web_page_preview: true,
   };
   if (buttons) payload.reply_markup = { inline_keyboard: buttons };

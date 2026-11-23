@@ -1639,7 +1639,8 @@ async function handlePreview(env: Env, chatId: number): Promise<void> {
       [toggleBtn, { text: "Cancel", callback_data: "cancel:preview" }],
     ];
 
-    await sendKeyboardMessage(env, chatId, previewText, buttons);
+    const safePreview = previewText.length > 3900 ? previewText.slice(0, 3897) + "..." : previewText;
+    await sendKeyboardMessage(env, chatId, safePreview, buttons);
   } catch (error) {
     console.error("handlePreview failed", error);
     await alertOwner(env, "handlePreview: " + String(error).slice(0, 200));
