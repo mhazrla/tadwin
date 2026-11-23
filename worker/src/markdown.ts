@@ -154,6 +154,15 @@ function escapeAttr(url: string): string {
   return escapeHtml(url).replace(/"/g, "&quot;");
 }
 
+function safeHref(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    return ["http:", "https:", "mailto:", "tg:"].includes(parsed.protocol) ? url : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Notion rich_text -> Telegram HTML, keeping bold/italic/code/strike/links.
  * Used when reading existing entries back out of Notion.
@@ -175,7 +184,8 @@ export function richTextToHtml(items: unknown): string {
       if (a.underline) text = `<u>${text}</u>`;
 
       const url = item.href ?? item.text?.link?.url;
-      if (url) text = `<a href="${escapeAttr(url)}">${text}</a>`;
+      const safe = url ? safeHref(url) : null;
+      if (safe) text = `<a href="${escapeAttr(safe)}">${text}</a>`;
       return text;
     })
     .join("");

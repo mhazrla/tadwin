@@ -264,7 +264,6 @@ export default {
       const info = {
         base,
         model: env.AI_MODEL,
-        keyLen: (env.AI_API_KEY || "").length,
       };
       try {
         const controller = new AbortController();
@@ -290,11 +289,11 @@ export default {
           status: resp.status,
           ms: Date.now() - started,
         });
-      } catch (error) {
+      } catch {
         return Response.json({
           ...info,
           ok: false,
-          error: String(error),
+          error: "request_failed",
           ms: Date.now() - started,
         });
       }
