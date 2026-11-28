@@ -106,7 +106,7 @@ export class SessionDO {
 
       case "setTitle": {
         const value = typeof body.title === "string" ? body.title.trim() : "";
-        const next: SessionState = { ...current, title: value || null };
+        const next: SessionState = { ...current, title: value || null, pendingBlocks: [] };
         await this.state.storage.put("session", next);
         return Response.json(next);
       }
@@ -167,7 +167,7 @@ export class SessionDO {
       }
 
       case "clearMaterials": {
-        const next: SessionState = { ...current, materials: [] };
+        const next: SessionState = { ...current, materials: [], pendingBlocks: [] };
         await this.state.storage.put("session", next);
         return Response.json(next);
       }
@@ -240,7 +240,11 @@ export class SessionDO {
           return Response.json({ error: "bad field" }, { status: 400 });
         }
         const list = [...(current[field] as unknown[]), body.value];
-        const next = { ...current, [field]: list } as SessionState;
+        const next = {
+          ...current,
+          [field]: list,
+          ...(field === "materials" ? { pendingBlocks: [] } : {}),
+        } as SessionState;
         await this.state.storage.put("session", next);
         return Response.json(next);
       }

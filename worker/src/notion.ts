@@ -117,32 +117,42 @@ export async function collectFormatExamples(
   max = 3,
 ): Promise<string[]> {
   const children = await getChildren(env, pageId);
-  const examples: string[] = [];
 
-  for (const block of children) {
-    if (examples.length >= max) break;
-    const type = block.type as string | undefined;
-    if (!type || !["heading_1", "heading_2", "heading_3"].includes(type)) continue;
-    const obj = block[type] as Json | undefined;
-    if (!obj?.is_toggleable) continue;
+  const toggleCandidates = children
+    .filter((block) => {
+      const type = block.type as string | undefined;
+      if (!type || !["heading_1", "heading_2", "heading_3"].includes(type)) return false;
+      const obj = block[type] as Json | undefined;
+      return Boolean(obj?.is_toggleable && block.has_children);
+    })
+    .slice(0, max);
 
-    const lines = [`[${TYPE_TAG[type]}] ${plain(block).trim()}`];
-    if (block.has_children) {
+  if (toggleCandidates.length) {
+    const built = await Promise.all(
+      toggleCandidates.map(async (block) => {
+        const type = block.type as string;
+        const lines = [`[${TYPE_TAG[type]}] ${plain(block).trim()}`];
+        await typedLines(env, await getChildren(env, block.id as string), 0, lines);
+        return lines.length > 1 ? lines.join("\n") : null;
+      }),
+    );
+    const examples = built.filter((item): item is string => item !== null);
+    if (examples.length) return examples;
+  }
+
+  const pageCandidates = children
+    .filter((block) => block.type === "child_page")
+    .slice(0, max);
+
+  const builtPages = await Promise.all(
+    pageCandidates.map(async (block) => {
+      const title = ((block.child_page as Json)?.title as string) ?? "Untitled";
+      const lines = [`[page] ${title}`];
       await typedLines(env, await getChildren(env, block.id as string), 0, lines);
-    }
-    if (lines.length > 1) examples.push(lines.join("\n"));
-  }
-  if (examples.length) return examples;
-
-  for (const block of children) {
-    if (examples.length >= max) break;
-    if (block.type !== "child_page") continue;
-    const title = ((block.child_page as Json)?.title as string) ?? "Untitled";
-    const lines = [`[page] ${title}`];
-    await typedLines(env, await getChildren(env, block.id as string), 0, lines);
-    if (lines.length > 1) examples.push(lines.join("\n"));
-  }
-  return examples;
+      return lines.length > 1 ? lines.join("\n") : null;
+    }),
+  );
+  return builtPages.filter((item): item is string => item !== null);
 }
 
 export interface SectionRef {

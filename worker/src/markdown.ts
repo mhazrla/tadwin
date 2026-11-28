@@ -199,16 +199,28 @@ const ALLOWED = new Set([
   "bulleted_list_item",
   "numbered_list_item",
   "divider",
+  "code",
 ]);
+
+function normalizeBlockText(type: string, text: string): string {
+  if (type === "bulleted_list_item") return text.replace(/^[-*+•]\s+/, "").trim();
+  if (type === "numbered_list_item") return text.replace(/^\d+[.)]\s+/, "").trim();
+  if (type === "quote") return text.replace(/^>\s?/gm, "").trim();
+  return text;
+}
 
 /** One Notion block from a type plus Markdown text. */
 export function blockOf(type: string, markdown: string): Block | null {
   if (type === "divider") {
     return { object: "block", type: "divider", divider: {} };
   }
-  const text = markdown.trim();
-  if (!text) return null;
   const safe = ALLOWED.has(type) ? type : "paragraph";
+  if (safe === "code") {
+    const raw = markdown.trim();
+    return raw ? codeBlock(raw) : null;
+  }
+  const text = normalizeBlockText(safe, markdown.trim());
+  if (!text) return null;
   return {
     object: "block",
     type: safe,

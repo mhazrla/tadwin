@@ -72,21 +72,47 @@ to text/code.
 
 `/done` shows a preview (title, material, audio/image, block summary, format reference, snippet).
 Buttons: **Send**, **Edit title**, **Edit material**, **Ringkas (AI)/Raw (tanpa AI)**, **Cancel**.
-AI mode extracts key points and mirrors existing section format on the page; dalil/ayat/hadith/Arabic
-(including harakat) are preserved verbatim. Header shows `[Ringkas (AI)]`, `[Raw (tanpa AI)]`, or
-`[Fallback (AI gagal: ...)]`. Check AI with `GET /aistatus/<WEBHOOK_SECRET>`.
+
+AI mode produces a structured study summary rather than a transcript: explanations become
+`bulleted_list_item` points (numbered for ordered steps), grouped under short `heading_2`/`heading_3`
+subheadings when the material has distinct topics, and the entry ends with a **Pelajaran Penting**
+section of practical takeaways. Greetings/boilerplate are dropped; substantive detail is kept.
+
+Dalil (ayat, hadith, athar, scholarly quote) are kept in full — Arabic verbatim including harakat
+**and** its translation, in or right after the same `quote` block. Existing toggle entries on the page
+are used as a format reference; a page without any still works (default structure, no hard block).
+
+Header shows `[Ringkas (AI)]`, `[Raw (tanpa AI)]`, or `[Fallback (AI gagal: ...)]`. Check AI with
+`GET /aistatus/<WEBHOOK_SECRET>`. The previewed blocks are stored in the session and reused by
+**Send**, so confirming never calls the AI a second time; editing the title or material discards them.
 
 The AI call retries transient upstream failures (`429`, `5xx`, timeout) with backoff and, if the
 primary model keeps failing, switches to `AI_FALLBACK_MODEL` (default `gemini-3.5-flash`). Gemini
 frequently returns `503 high demand` for a single model while another is healthy, so the fallback
-is what keeps `/done` from dropping to raw text. Total AI time is capped (~24 s) to stay inside
-Telegram's webhook window.
+is what keeps `/done` from dropping to raw text. Requests use `response_format: json_object` and
+retry without it if a proxy rejects that field.
+
+Rejected AI output gets one corrective retry with a reason-specific instruction (`too_short`,
+`ai_parse`/`ai_empty`, `arabic_dropped`) before falling back to the local parser. The Arabic and
+length checks ignore the boilerplate the prompt tells the model to drop (salam, basmalah,
+"amma ba'du", closing doa, the entry title), so dropping noise is not mistaken for dropping dalil.
+
+Timing is budgeted from the moment the update arrives: each attempt gets 11 s (13 s for long
+material), one `formatMaterial()` call at most 20 s, and the whole AI flow at most 22 s — reduced
+further by however long the update has already taken, so `/done` still finishes inside the Worker's
+~30 s window.
 
 ## Clearing the chat
 
 `/clearchat` (alias `/bersihkan`) deletes tracked bot messages in this chat. Telegram only allows a
 bot to delete its own messages, and only within 48 hours; older/untracked messages may be skipped.
 Your own messages cannot be deleted by the bot in a private chat.
+
+Every other user action (message, command, button tap) auto-clears tracked bot messages first. That
+cleanup is time-boxed — 2.5 s before `/done` or **Send**, 5 s otherwise — and deletes in batches of 5
+in parallel, so a long chat history cannot eat the window the actual action needs.
+
+## What you need
 
 - A Cloudflare account (free).
 - A Telegram bot token from [@BotFather](https://t.me/BotFather).
@@ -171,16 +197,26 @@ npx wrangler rollback                 # revert to the previous version
 Gemini model IDs rotate. List the ones available to your key:
 
 ```bash
-curl "https://tadwin.<subdomain>.workers.dev/aistatus/<WEBHOOK_SECRET>"
+curl -s -H "Authorization: Bearer $AI_API_KEY" \
+  https://generativelanguage.googleapis.com/v1beta/openai/models
 ```
+
+`GET /aistatus/<WEBHOOK_SECRET>` only reports which model the Worker is currently using and whether the
+last probe worked; it does not list models.
 
 Pick a chat-capable `id` (without the `models/` prefix) and set it:
 
 ```bash
 npx wrangler secret put AI_MODEL
+npx wrangler secret put AI_FALLBACK_MODEL   # optional; default gemini-3.5-flash
 ```
 
-Common IDs: `gemini-2.5-flash-lite`, `gemini-3.5-flash-lite`.
+`AI_FALLBACK_MODEL` is only used when the primary model fails with an overload/5xx/timeout after
+retrying. Keep it on a different model family from `AI_MODEL` so one capacity spike cannot take both
+down.
+
+Common IDs: `gemini-3.5-flash-lite` (default), `gemini-3.5-flash`, `gemini-3.1-flash-lite`.
+`gemini-2.5-flash-lite` is retired for new keys and returns 404.
 
 ## Formatting
 
@@ -192,6 +228,8 @@ Formatting never depends on how Telegram renders text:
 
 Supported: `**bold**`, `*italic*`, `` `code` ``, `~~strike~~`, `[link](url)`, `# heading`, `> quote`,
 `-`/`1.` lists, `---`, fenced code, and Markdown tables (stored as code blocks so columns stay aligned).
+Block types also include `code`. When a block already has an explicit type, stray list/quote markers at
+the start of its text (`-`, `1.`, `>`) are stripped so bullets are not duplicated.
 
 If the AI call fails or times out, the local Markdown parser takes over, so entries still land formatted.
 
@@ -199,7 +237,8 @@ If the AI call fails or times out, the local Markdown parser takes over, so entr
 
 - **Notion Free: 5 MB per file.** Long recordings are rejected; the bot explains why.
 - **Telegram Bot API: 20 MB per download.** Larger files cannot be fetched at all.
-- **`ctx.waitUntil()` ≈ 30 s** after the response. AI is capped at 20 s; media uploads run in parallel.
+- **`ctx.waitUntil()` ≈ 30 s** after the response. The AI flow is capped at 22 s (and shrinks by the
+  time already spent on the update); media uploads run in parallel.
 - **10 ms CPU per request** (Free plan). Network calls are not counted, but very large text parsing can
   approach the limit — split huge material across files.
 - **100,000 requests/day per account**, shared by all your Workers. A personal bot stays far below that.

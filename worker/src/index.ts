@@ -313,8 +313,9 @@ export default {
 };
 
 async function handleUpdate(env: Env, update: TgUpdate): Promise<void> {
+  const startedAt = Date.now();
   if (update.callback_query) {
-    await handleCallback(env, update.callback_query);
+    await handleCallback(env, update.callback_query, startedAt);
     return;
   }
 
@@ -327,14 +328,15 @@ async function handleUpdate(env: Env, update: TgUpdate): Promise<void> {
   const text = typeof msg.text === "string" ? msg.text.trim() : "";
   const cmd = text.startsWith("/") ? text.split(/\s+/)[0].split("@")[0].toLowerCase() : "";
   if (cmd !== "/clearchat" && cmd !== "/bersihkan") {
-    await clearTrackedBotMessages(env, chatId);
+    const clearBudget = cmd === "/done" || cmd === "/selesai" ? 2_500 : 5_000;
+    await clearTrackedBotMessages(env, chatId, clearBudget);
   }
   if (text.startsWith("/")) {
-    await handleCommand(env, chatId, text);
+    await handleCommand(env, chatId, text, startedAt);
     return;
   }
   if (msg.document) {
-    await handleDocument(env, chatId, msg);
+    await handleDocument(env, chatId, msg, startedAt);
     return;
   }
   if (Array.isArray(msg.photo) && msg.photo.length > 0) {
@@ -349,7 +351,7 @@ async function handleUpdate(env: Env, update: TgUpdate): Promise<void> {
     await handleVideo(env, chatId, (msg.video ?? msg.video_note)!);
     return;
   }
-  if (text) await handleText(env, chatId, msg);
+  if (text) await handleText(env, chatId, msg, startedAt);
 }
 
 async function chatAllowed(env: Env, chatId: number): Promise<boolean> {
@@ -363,7 +365,12 @@ async function chatAllowed(env: Env, chatId: number): Promise<boolean> {
   return false;
 }
 
-async function handleCommand(env: Env, chatId: number, text: string): Promise<void> {
+async function handleCommand(
+  env: Env,
+  chatId: number,
+  text: string,
+  startedAt = Date.now(),
+): Promise<void> {
   const command = text.split(/\s+/)[0].split("@")[0].toLowerCase();
 
   switch (command) {
@@ -466,7 +473,7 @@ async function handleCommand(env: Env, chatId: number, text: string): Promise<vo
         await sendMessage(env, chatId, "Send /add first before using /done.");
         return;
       }
-      await handlePreview(env, chatId);
+      await handlePreview(env, chatId, startedAt);
       return;
     }
 
@@ -656,23 +663,25 @@ async function setGuideMessageId(env: Env, chatId: number, id: number): Promise<
 async function clearTrackedBotMessages(
   env: Env,
   chatId: number,
+  budgetMs = 25_000,
 ): Promise<{ deleted: number; skipped: number; remaining: number; total: number }> {
   const ids = await botMessages(env, chatId);
   if (ids.length === 0) return { deleted: 0, skipped: 0, remaining: 0, total: 0 };
 
   const started = Date.now();
+  const BATCH = 5;
   let deleted = 0;
   let skipped = 0;
   let index = 0;
 
-  for (; index < ids.length; index++) {
-    // ctx.waitUntil is about 30 s; stop early so the report still gets through.
-    if (Date.now() - started > 25000) break;
-    try {
-      await deleteMessage(env, chatId, ids[index]);
-      deleted++;
-    } catch {
-      skipped++;
+  for (; index < ids.length; index += BATCH) {
+    // ctx.waitUntil is about 30 s; stop early so the main action keeps its budget.
+    if (Date.now() - started > budgetMs) break;
+    const chunk = ids.slice(index, index + BATCH);
+    const results = await Promise.allSettled(chunk.map((id) => deleteMessage(env, chatId, id)));
+    for (const res of results) {
+      if (res.status === "fulfilled") deleted++;
+      else skipped++;
     }
   }
 
@@ -992,7 +1001,11 @@ async function handleSearch(env: Env, chatId: number, arg: string): Promise<void
   }
 }
 
-async function handleCallback(env: Env, query: TgCallbackQuery): Promise<void> {
+async function handleCallback(
+  env: Env,
+  query: TgCallbackQuery,
+  startedAt = Date.now(),
+): Promise<void> {
   const chatId = query.message?.chat?.id;
   if (!chatId) return;
 
@@ -1000,9 +1013,10 @@ async function handleCallback(env: Env, query: TgCallbackQuery): Promise<void> {
     await answerCallbackQuery(env, query.id);
     return;
   }
-  await clearTrackedBotMessages(env, chatId);
-
   const data = query.data ?? "";
+  const isSlowAction =
+    data === "mode:ai" || data === "mode:raw" || data === "confirm:done";
+  await clearTrackedBotMessages(env, chatId, isSlowAction ? 2_500 : 5_000);
 
   if (data === "cur") {
     await answerCallbackQuery(env, query.id);
@@ -1029,7 +1043,7 @@ async function handleCallback(env: Env, query: TgCallbackQuery): Promise<void> {
     }
     await sessionCall(env, chatId, { op: "setSummaryMode", value: data === "mode:raw" ? "raw" : "ai" });
     await answerCallbackQuery(env, query.id);
-    await handlePreview(env, chatId);
+    await handlePreview(env, chatId, startedAt);
     return;
   }
 
@@ -1050,7 +1064,7 @@ async function handleCallback(env: Env, query: TgCallbackQuery): Promise<void> {
       try { await deleteMessage(env, chatId, query.message.message_id); } catch (error) { console.error("delete list failed", messageOf(error)); }
     }
     await answerCallbackQuery(env, query.id, "Building...");
-    await handleConfirmDone(env, chatId);
+    await handleConfirmDone(env, chatId, startedAt);
     return;
   }
 
@@ -1266,7 +1280,12 @@ async function trySend(send: () => Promise<void>): Promise<string | null> {
   }
 }
 
-async function handleText(env: Env, chatId: number, msg: TgMessage): Promise<void> {
+async function handleText(
+  env: Env,
+  chatId: number,
+  msg: TgMessage,
+  startedAt = Date.now(),
+): Promise<void> {
   const raw = typeof msg.text === "string" ? msg.text.trim() : "";
   // Telegram sends formatting as entities, not as characters.
   const text = entitiesToMarkdown(raw, msg.entities);
@@ -1294,7 +1313,7 @@ async function handleText(env: Env, chatId: number, msg: TgMessage): Promise<voi
     await sessionCall(env, chatId, { op: "setTitle", title: newTitle });
     await sessionCall(env, chatId, { op: "setAwaitingEdit", value: null });
     await sendMessage(env, chatId, "Title updated.");
-    await handlePreview(env, chatId);
+    await handlePreview(env, chatId, startedAt);
     return;
   }
   if (session.awaitingEdit === "material") {
@@ -1302,7 +1321,7 @@ async function handleText(env: Env, chatId: number, msg: TgMessage): Promise<voi
     await sessionCall(env, chatId, { op: "push", field: "materials", value: text });
     await sessionCall(env, chatId, { op: "setAwaitingEdit", value: null });
     await sendMessage(env, chatId, "Material updated (" + text.length + " characters).");
-    await handlePreview(env, chatId);
+    await handlePreview(env, chatId, startedAt);
     return;
   }
 
@@ -1351,7 +1370,12 @@ async function handleText(env: Env, chatId: number, msg: TgMessage): Promise<voi
   await sendMessage(env, chatId, `Material received (${raw.length} characters). \u{1F4DD}`);
 }
 
-async function handleDocument(env: Env, chatId: number, msg: TgMessage): Promise<void> {
+async function handleDocument(
+  env: Env,
+  chatId: number,
+  msg: TgMessage,
+  startedAt = Date.now(),
+): Promise<void> {
   if (!isAdmin(env, chatId)) {
     await sendMessage(env, chatId, READ_ONLY_MSG);
     return;
@@ -1389,7 +1413,7 @@ async function handleDocument(env: Env, chatId: number, msg: TgMessage): Promise
         await sessionCall(env, chatId, { op: "push", field: "materials", value: text });
         await sessionCall(env, chatId, { op: "setAwaitingEdit", value: null });
         await sendMessage(env, chatId, "Material updated from file (" + text.length + " characters).");
-        await handlePreview(env, chatId);
+        await handlePreview(env, chatId, startedAt);
         return;
       }
 
@@ -1563,7 +1587,11 @@ function humanReason(reason?: string): string {
   }
 }
 
-async function handlePreview(env: Env, chatId: number): Promise<void> {
+async function handlePreview(
+  env: Env,
+  chatId: number,
+  startedAt = Date.now(),
+): Promise<void> {
   const session = await sessionCall(env, chatId, { op: "get" });
   if (!session.pageId) {
     await sendMessage(env, chatId, "No Notion page link yet.");
@@ -1594,7 +1622,8 @@ async function handlePreview(env: Env, chatId: number): Promise<void> {
     if (mode === "raw") {
       formatted = { blocks: markdownToBlocks(material), source: "raw" };
     } else {
-      formatted = await formatMaterial(env, material, title, references);
+      const aiBudgetMs = Math.max(8_000, 26_000 - (Date.now() - startedAt));
+      formatted = await formatMaterial(env, material, title, references, aiBudgetMs);
     }
     const blocks = formatted.blocks;
 
@@ -1668,7 +1697,11 @@ async function handlePreview(env: Env, chatId: number): Promise<void> {
   }
 }
 
-async function handleConfirmDone(env: Env, chatId: number): Promise<void> {
+async function handleConfirmDone(
+  env: Env,
+  chatId: number,
+  startedAt = Date.now(),
+): Promise<void> {
   const session = await sessionCall(env, chatId, { op: "get" });
   if (!session.pageId) {
     await sendMessage(env, chatId, "No Notion page link yet.");
@@ -1707,15 +1740,15 @@ async function handleConfirmDone(env: Env, chatId: number): Promise<void> {
   }
 
   try {
-    const references = await collectFormatExamples(env, session.pageId);
-
     await setProgress("Formatting material...");
     let blocks: Block[];
     const pending = session.pendingBlocks;
     if (Array.isArray(pending) && pending.length > 0) {
       blocks = pending as Block[];
     } else {
-      blocks = (await formatMaterial(env, material, title, references)).blocks;
+      const references = await collectFormatExamples(env, session.pageId);
+      const aiBudgetMs = Math.max(8_000, 26_000 - (Date.now() - startedAt));
+      blocks = (await formatMaterial(env, material, title, references, aiBudgetMs)).blocks;
     }
 
     await setProgress("Uploading media...");

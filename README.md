@@ -47,10 +47,12 @@ Then send `/start` to your bot.
 | `AI_API_KEY` | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
 | `AI_BASE_URL` | `https://generativelanguage.googleapis.com/v1beta/openai` |
 | `AI_MODEL` | e.g. `gemini-3.5-flash-lite` (check with `GET /aistatus/<WEBHOOK_SECRET>`) |
+| `AI_FALLBACK_MODEL` | optional, default `gemini-3.5-flash` — used only when the primary model is overloaded |
 | `WEBHOOK_SECRET` | any random string |
 
-The target Notion page must be shared with the integration (**⋯ → Connections**), and it must already
-contain **at least one toggle entry** — Tadwin copies that entry's style. Without one it asks you to add it.
+The target Notion page must be shared with the integration (**⋯ → Connections**). Existing toggle
+entries on that page are read as a style reference (block types, order, granularity); a page with none
+still works — the bot falls back to a sensible default structure instead of refusing the entry.
 
 ---
 
@@ -123,15 +125,26 @@ back to sending the link as text.
 reference count, and a snippet of the formatted content. Buttons: **Send** (build), **Edit title**,
 **Edit material**, **Ringkas (AI)** / **Raw (tanpa AI)** toggle, and **Cancel**.
 
-In AI mode, the bot extracts key points from the material and mirrors the block structure of existing
-entries on the same Notion page (format reference). Dalil/ayat/hadith/Arabic text (including harakat)
-is preserved verbatim; non-dalil text is condensed into key points.
+In AI mode the bot turns the material into a structured study summary: explanations become bullet
+points (`bulleted_list_item`, or numbered for ordered steps), grouped under short subheadings when the
+material covers several topics, and the entry ends with a **Pelajaran Penting** section listing the
+practical takeaways. It is deliberately *not* over-compressed — only greetings, boilerplate, and obvious
+repetition are dropped.
+
+Every dalil (ayat, hadith, athar, scholarly quote) is kept in full: the Arabic text verbatim (harakat
+included) **plus** its translation, in or right after the same quote block. The block structure of
+existing entries on the same Notion page is used as a format reference.
 
 The preview header shows the actual source: `[Ringkas (AI)]`, `[Raw (tanpa AI)]`, or
-`[Fallback (AI gagal: <reason>)]` when AI output is rejected/fails (local parser fallback keeps dalil/Arabic).
+`[Fallback (AI gagal: <reason>)]` when AI output is rejected/fails (the local parser then takes over, so
+dalil/Arabic still land intact). The blocks you previewed are the blocks that get written — pressing
+**Send** does not call the AI again.
 
 AI connectivity can be checked with `GET /aistatus/<WEBHOOK_SECRET>` (reports base URL, model, HTTP
-status, and latency; endpoint is secret-path protected).
+status, and latency; endpoint is secret-path protected). Transient upstream failures (`429`, `5xx`,
+timeout) are retried with backoff, and if the primary model keeps failing the bot switches to
+`AI_FALLBACK_MODEL` (default `gemini-3.5-flash`) — Gemini often returns `503 high demand` for one model
+while another is healthy.
 
 ## Navigation after a pick
 
@@ -144,6 +157,9 @@ you first browsed. At the home page itself only **Back** is shown, to re-open th
 `/clearchat` (alias `/bersihkan`) deletes tracked bot messages in this chat. Telegram only allows a
 bot to delete its own messages, and only within 48 hours; older/untracked messages may be skipped.
 Your own messages cannot be deleted by the bot in a private chat.
+
+Every other action you take (message, command, button tap) auto-clears the previous bot messages first,
+so the chat stays clean without running `/clearchat`.
 
 ---
 
@@ -163,6 +179,10 @@ Supported: `**bold**`, `*italic*`, `` `code` ``, `~~strike~~`, `[link](url)`, `#
 `-`/`1.` lists, `---`, fenced code, and Markdown tables (rendered as images when read back from Notion).
 Arabic text and harakat are preserved byte-for-byte. Links in Telegram HTML output are scheme-allowlisted (`http/https/mailto/tg`).
 
+When the AI already picked a block type, stray list/quote markers at the start of that block's text
+(`-`, `1.`, `>`) are stripped so the bullet is not duplicated; `code` is a valid block type for
+preformatted text.
+
 If the AI call fails or times out, a local Markdown parser takes over, so the entry still lands formatted.
 
 ---
@@ -173,7 +193,7 @@ If the AI call fails or times out, a local Markdown parser takes over, so the en
 |---|---|
 | Notion Free file size | **5 MB per file** |
 | Telegram Bot API download | **20 MB per file** |
-| Worker wall clock after response (`ctx.waitUntil`) | ~30 s (AI capped at 20 s) |
+| Worker wall clock after response (`ctx.waitUntil`) | ~30 s (AI capped ~22 s, shrinking with elapsed time) |
 | Worker CPU (Free plan) | 10 ms per request |
 | Account requests (Free plan) | 100,000 per day, shared across Workers |
 

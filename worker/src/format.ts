@@ -108,22 +108,36 @@ export function decodeText(buffer: ArrayBuffer): string {
 }
 
 export function extractTitle(material: string): string {
+  const cleanLine = (line: string): string =>
+    line
+      .replace(/^[\s\p{P}\p{S}\p{Extended_Pictographic}]+/u, "")
+      .replace(/[*_`]+$/g, "")
+      .trim();
+
   const lines = material
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
   for (const line of lines) {
-    const lower = line.toLowerCase();
+    const cleaned = cleanLine(line);
+    const lower = cleaned.toLowerCase();
     if (lower.startsWith("judul") || lower.startsWith("title")) {
-      const idx = line.indexOf(":");
+      const idx = cleaned.indexOf(":");
       if (idx >= 0) {
-        const value = line.slice(idx + 1).trim();
+        const value = cleanLine(cleaned.slice(idx + 1));
         if (value) return value.slice(0, 120);
       }
     }
   }
+  // Prefer explicit entry markers commonly used in study notes ("Audio ke-397 ...", "Halaqah ...").
+  for (const line of lines) {
+    const cleaned = cleanLine(line);
+    if (/^(?:audio\s+ke[-\s]*\d+|halaq[ao]h)\b/i.test(cleaned)) {
+      return cleaned.slice(0, 120);
+    }
+  }
   const isNoise = (line: string): boolean => {
-    const cleaned = line.replace(/^[\s\p{P}\p{S}\p{Extended_Pictographic}]+/u, "").trim();
+    const cleaned = cleanLine(line);
     if (/^https?:\/\//i.test(cleaned) || /^https?:\/\//i.test(line)) return true;
     if (/^[\s\p{P}\p{S}\p{Extended_Pictographic}═╔╗╚╝║╠╣╦╩╬❖•ೋ°☛]+$/u.test(line)) return true;
     if (/^(whatsapp|telegram|instagram|facebook|fanspage|website|official|grup|group|channel)\b/i.test(cleaned)) return true;
@@ -134,13 +148,11 @@ export function extractTitle(material: string): string {
     const letters = cleaned.replace(/[^\p{L}\p{N}]/gu, "");
     return letters.length < 4;
   };
-  const cleanTitle = (line: string): string =>
-    line.replace(/^[\s\p{P}\p{S}\p{Extended_Pictographic}]+/u, "").trim().slice(0, 120);
   for (const line of lines) {
     if (isNoise(line)) continue;
-    return cleanTitle(line);
+    return cleanLine(line).slice(0, 120);
   }
-  return cleanTitle(lines[0] ?? "New entry");
+  return cleanLine(lines[0] ?? "New entry").slice(0, 120);
 }
 
 /** Notion caps rich_text at 2000 characters. */
@@ -159,20 +171,36 @@ export function toBlock(item: AiItem): Block | null {
   return blockOf(item.type ?? "paragraph", item.text ?? "");
 }
 
-/** Extract the blocks array from an AI reply that may be wrapped in code fences. */
-export function parseBlocks(content: string | null): AiItem[] | null {
-  if (!content) return null;
-  let text = content.trim();
-  text = text.replace(/^```[a-zA-Z]*\s*/, "").replace(/\s*```$/, "");
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start === -1 || end <= start) return null;
+function tryParseBlocksJson(raw: string): AiItem[] | null {
   try {
-    const data = JSON.parse(text.slice(start, end + 1)) as { blocks?: unknown };
-    return Array.isArray(data.blocks) ? (data.blocks as AiItem[]) : null;
+    const data = JSON.parse(raw) as { blocks?: unknown };
+    return data && typeof data === "object" && Array.isArray(data.blocks)
+      ? (data.blocks as AiItem[])
+      : null;
   } catch {
     return null;
   }
+}
+
+/** Extract the blocks array from an AI reply that may be wrapped in code fences. */
+export function parseBlocks(content: string | null): AiItem[] | null {
+  if (!content) return null;
+  const trimmed = content.trim();
+
+  const direct = tryParseBlocksJson(trimmed);
+  if (direct) return direct;
+
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced) {
+    const parsedFence = tryParseBlocksJson(fenced[1].trim());
+    if (parsedFence) return parsedFence;
+  }
+
+  const stripped = trimmed.replace(/^```[a-zA-Z]*\s*/, "").replace(/\s*```$/, "");
+  const start = stripped.indexOf("{");
+  const end = stripped.lastIndexOf("}");
+  if (start === -1 || end <= start) return null;
+  return tryParseBlocksJson(stripped.slice(start, end + 1));
 }
 
 const HEX32 = /[0-9a-fA-F]{32}/g;
