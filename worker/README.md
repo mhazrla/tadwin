@@ -98,9 +98,9 @@ length checks ignore the boilerplate the prompt tells the model to drop (salam, 
 "amma ba'du", closing doa, the entry title), so dropping noise is not mistaken for dropping dalil.
 
 Timing is budgeted from the moment the update arrives: each attempt gets 11 s (13 s for long
-material), one `formatMaterial()` call at most 20 s, and the whole AI flow at most 22 s — reduced
-further by however long the update has already taken, so `/done` still finishes inside the Worker's
-~30 s window.
+material) — the first attempt may be capped lower to reserve room for the fallback model — one
+`formatMaterial()` call at most 20 s, and the whole AI flow at most 22 s, reduced further by however
+long the update has already taken so `/done` still finishes inside the Worker's ~30 s window.
 
 ## Clearing the chat
 
